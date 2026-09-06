@@ -122,15 +122,22 @@ export function importCardBytes(fileName: string, bytes: Uint8Array): ImportedCa
     card = parseJson(bytes);
   }
   const originalCard = clone(card);
+  const version = detectVersion(card);
+  const fields = extractEditableFields(card, originalCard);
+  const lowerFileName = fileName.toLowerCase();
+  if (version === "unknown") warnings.push("The character-card schema was not recognized. Unknown data will be preserved, but compatibility is not guaranteed.");
+  if (fields.length === 0) warnings.push("No recognized editable text fields were found in this card.");
+  if (source === "png" && !lowerFileName.endsWith(".png")) warnings.push("The file contains PNG data but does not use a .png filename extension.");
+  if (source === "json" && !lowerFileName.endsWith(".json")) warnings.push("The file contains JSON data but does not use a .json filename extension.");
   return {
     fileName,
     source,
-    version: detectVersion(card),
+    version,
     originalBytes: bytes.slice(),
     card,
     originalCard,
     png,
-    fields: extractEditableFields(card, originalCard),
+    fields,
     warnings
   };
 }

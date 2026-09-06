@@ -39,4 +39,15 @@ describe("JSON card workspace", () => {
       "Lorebook Entry 1"
     ]);
   });
+
+  it("reports recoverable schema and filename problems", () => {
+    const bytes = new TextEncoder().encode(JSON.stringify({ future_data: true }));
+    const workspace = importCardBytes("card.txt", bytes);
+    expect(workspace.version).toBe("unknown");
+    expect(workspace.warnings).toEqual([
+      "The character-card schema was not recognized. Unknown data will be preserved, but compatibility is not guaranteed.",
+      "No recognized editable text fields were found in this card.",
+      "The file contains JSON data but does not use a .json filename extension."
+    ]);
+  });
 });

@@ -6,6 +6,7 @@ import { analyzeText, applyHighConfidence, applyProposal } from "./core/rules";
 import type { EditProposal, ImportedCard } from "./core/types";
 
 type WorkspaceTab = "edit" | "review" | "preview";
+const releaseLabel = `v${__APP_VERSION__} alpha`;
 
 function safeMarkup(text: string): string {
   const escaped = text
@@ -51,7 +52,8 @@ function App() {
       setSelectedFieldId(imported.fields[0]?.id ?? "");
       setIgnored(new Set());
       setTab("edit");
-      setMessage(`${imported.version.toUpperCase()} ${imported.source.toUpperCase()} loaded locally`);
+      const warningSummary = imported.warnings.length > 0 ? ` · ${imported.warnings.length} warning${imported.warnings.length === 1 ? "" : "s"}` : "";
+      setMessage(`${imported.version.toUpperCase()} ${imported.source.toUpperCase()} loaded locally${warningSummary}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The card could not be opened.");
     }
@@ -107,7 +109,7 @@ function App() {
       <header className="topbar">
         <div>
           <div className="eyebrow">LOCAL CHARACTER CARD WORKBENCH</div>
-          <h1>Cardsmith</h1>
+          <div className="product-title"><h1>Cardsmith</h1><span>{releaseLabel}</span></div>
         </div>
         <div className="privacy-pill"><span aria-hidden="true">●</span> On-device only</div>
       </header>
@@ -140,6 +142,13 @@ function App() {
               if (file) void loadFile(file);
             }} />
           </section>
+
+          {workspace.warnings.length > 0 && (
+            <section className="warning-panel" aria-label="Import warnings">
+              <div className="warning-heading"><span aria-hidden="true">!</span><strong>Review this import</strong></div>
+              <ul>{workspace.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+            </section>
+          )}
 
           <nav className="tabs" aria-label="Workspace views">
             {(["edit", "review", "preview"] as WorkspaceTab[]).map((item) => (
