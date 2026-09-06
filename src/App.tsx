@@ -1,12 +1,49 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { exportCardBytes, importCardBytes, updateCardField } from "./core/card";
-import { downloadBytes, editedFileName } from "./core/download";
+import {
+  analyzeCard,
+  applyHighConfidenceToCard,
+  countFindingCategories,
+  openCardFindings,
+  safeCardFindings
+} from "./core/cardReview";
+import { downloadBytes, editedFileName, ledgerFileName } from "./core/download";
 import { platformProfiles, resolvePronounMacros, type PlatformId, type PreviewPronouns } from "./core/macros";
-import { analyzeText, applyHighConfidenceWithDetails, applyProposal } from "./core/rules";
-import { buildChangeSummary, findingKey, type LoggedFinding } from "./core/summary";
+import { applyHighConfidenceWithDetails, applyProposal } from "./core/rules";
+import {
+  buildChangeSummary,
+  findingKey,
+  summaryToJson,
+  summaryToMarkdown,
+  type LoggedFinding
+} from "./core/summary";
 import type { EditProposal, ImportedCard } from "./core/types";
 
 type WorkspaceTab = "edit" | "review" | "preview" | "summary";
+type ChangeSource = "manual" | "proposal" | "restore";
+
+interface PendingSelection {
+  fieldId: string;
+  start: number;
+  end: number;
+}
+
+interface CardWideUndo {
+  workspace: ImportedCard;
+  accepted: LoggedFinding[];
+  ignored: LoggedFinding[];
+  manualFieldIds: Set<string>;
+}
+
+interface FindingCardProps {
+  entry: LoggedFinding;
+  ignored?: boolean;
+  onAccept?: () => void;
+  onIgnore?: () => void;
+  onRestore?: () => void;
+  onOpen?: () => void;
+}
+
 const releaseLabel = `v${__APP_VERSION__} alpha`;
 
 function safeMarkup(text: string): string {
@@ -14,7 +51,7 @@ function safeMarkup(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#039;");
   return escaped
     .replace(/`([^`\n]+)`/g, "<code>$1</code>")
@@ -28,11 +65,39 @@ function formatSize(length: number): string {
   return `${(length / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function FindingCard({ entry, ignored, onAccept, onIgnore, onRestore, onOpen }: FindingCardProps) {
+  const proposal = entry.proposal;
+  return (
+    <article className={ignored ? "proposal ignored-proposal" : "proposal"}>
+      <div className="proposal-meta">
+        <span className={`confidence ${ignored ? "ignored" : proposal.actionable ? proposal.confidence : "unresolved"}`}>
+          {ignored ? "Ignored" : proposal.actionable ? proposal.confidence : "No target equivalent"}
+        </span>
+        <span>{proposal.category}</span>
+      </div>
+      <p>{proposal.explanation}</p>
+      <div className={proposal.actionable ? "replacement" : "replacement unresolved-replacement"}>
+        <del>{proposal.before}</del>
+        <span aria-hidden="true">→</span>
+        <ins>{proposal.actionable ? proposal.after || "Remove formatting" : "Preserved exactly"}</ins>
+      </div>
+      <div className="proposal-actions">
+        {!ignored && proposal.actionable && onAccept && <button className="primary small" onClick={onAccept}>Accept</button>}
+        {!ignored && onIgnore && <button className="secondary small" onClick={onIgnore}>Ignore</button>}
+        {ignored && onRestore && <button className="secondary small" onClick={onRestore}>Restore finding</button>}
+        {onOpen && <button className="text-button small" onClick={onOpen}>Open in editor</button>}
+      </div>
+    </article>
+  );
+}
+
 function App() {
   const fileInput = useRef<HTMLInputElement>(null);
+  const editor = useRef<HTMLTextAreaElement>(null);
   const [workspace, setWorkspace] = useState<ImportedCard | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState("");
   const [tab, setTab] = useState<WorkspaceTab>("edit");
+  const [reviewAll, setReviewAll] = useState(false);
   const [fromPlatform, setFromPlatform] = useState<PlatformId>("janitor");
   const [toPlatform, setToPlatform] = useState<PlatformId>("wyvern");
   const [previewPronouns, setPreviewPronouns] = useState<PreviewPronouns>("she");
@@ -40,23 +105,47 @@ function App() {
   const [accepted, setAccepted] = useState<LoggedFinding[]>([]);
   const [ignored, setIgnored] = useState<LoggedFinding[]>([]);
   const [manualFieldIds, setManualFieldIds] = useState<Set<string>>(new Set());
+  const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
+  const [cardWideUndo, setCardWideUndo] = useState<CardWideUndo | null>(null);
+  const [expandedReviewFields, setExpandedReviewFields] = useState<Set<string>>(new Set());
 
   const selectedField = workspace?.fields.find((field) => field.id === selectedFieldId) ?? workspace?.fields[0];
-  const fieldFindings = useMemo(
-    () => selectedField ? analyzeText(selectedField.value, fromPlatform, toPlatform) : [],
-    [selectedField, fromPlatform, toPlatform]
+  const cardReviews = useMemo(
+    () => workspace ? analyzeCard(workspace, fromPlatform, toPlatform) : [],
+    [workspace, fromPlatform, toPlatform]
   );
-  const proposals = useMemo(
-    () => selectedField
-      ? fieldFindings.filter((proposal) => !ignored.some((entry) => findingKey(entry.fieldId, entry.proposal) === findingKey(selectedField.id, proposal)))
-      : [],
-    [selectedField, fieldFindings, ignored]
-  );
-  const changedFields = workspace?.fields.filter((field) => field.value !== field.originalValue).length ?? 0;
+  const allOpenFindings = useMemo(() => openCardFindings(cardReviews, ignored), [cardReviews, ignored]);
+  const allSafeFindings = useMemo(() => safeCardFindings(cardReviews, ignored), [cardReviews, ignored]);
+  const safeCategoryCounts = useMemo(() => countFindingCategories(allSafeFindings), [allSafeFindings]);
+  const selectedReview = cardReviews.find((review) => review.fieldId === selectedField?.id);
+  const fieldFindings = selectedReview?.findings ?? [];
+  const proposals = selectedField
+    ? allOpenFindings.filter((entry) => entry.fieldId === selectedField.id).map((entry) => entry.proposal)
+    : [];
+  const selectedAccepted = selectedField ? accepted.filter((entry) => entry.fieldId === selectedField.id) : [];
+  const selectedIgnored = selectedField ? ignored.filter((entry) => entry.fieldId === selectedField.id) : [];
+  const changedFields = cardReviews.filter((review) => review.dirty).length;
+  const unresolvedCount = cardReviews.reduce((count, review) => count + review.findings.filter((proposal) => !proposal.actionable).length, 0);
   const changeSummary = useMemo(
     () => workspace ? buildChangeSummary(workspace, fromPlatform, toPlatform, accepted, ignored, manualFieldIds) : null,
     [workspace, fromPlatform, toPlatform, accepted, ignored, manualFieldIds]
   );
+  const reviewFields = useMemo(() => workspace?.fields.map((field) => ({
+    field,
+    open: allOpenFindings.filter((entry) => entry.fieldId === field.id),
+    accepted: accepted.filter((entry) => entry.fieldId === field.id),
+    ignored: ignored.filter((entry) => entry.fieldId === field.id)
+  })).filter((review) => review.open.length + review.accepted.length + review.ignored.length > 0 || review.field.value !== review.field.originalValue) ?? [], [workspace, allOpenFindings, accepted, ignored]);
+
+  useEffect(() => {
+    if (!pendingSelection || pendingSelection.fieldId !== selectedField?.id || tab !== "edit") return;
+    const target = editor.current;
+    if (!target) return;
+    target.focus();
+    target.setSelectionRange(pendingSelection.start, pendingSelection.end);
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    setPendingSelection(null);
+  }, [pendingSelection, selectedField?.id, tab]);
 
   async function loadFile(file: File): Promise<void> {
     try {
@@ -66,6 +155,9 @@ function App() {
       setAccepted([]);
       setIgnored([]);
       setManualFieldIds(new Set());
+      setCardWideUndo(null);
+      setExpandedReviewFields(new Set(imported.fields[0] ? [imported.fields[0].id] : []));
+      setReviewAll(false);
       setTab("edit");
       const warningSummary = imported.warnings.length > 0 ? ` · ${imported.warnings.length} warning${imported.warnings.length === 1 ? "" : "s"}` : "";
       setMessage(`${imported.version.toUpperCase()} ${imported.source.toUpperCase()} loaded locally${warningSummary}`);
@@ -74,15 +166,18 @@ function App() {
     }
   }
 
-  function changeSelectedField(value: string, source: "manual" | "proposal" | "restore", applied: EditProposal[] = []): void {
-    if (!workspace || !selectedField) return;
-    setWorkspace(updateCardField(workspace, selectedField.path, value));
-    setIgnored((entries) => entries.filter((entry) => entry.fieldId !== selectedField.id));
+  function changeField(fieldId: string, value: string, source: ChangeSource, applied: EditProposal[] = []): void {
+    if (!workspace) return;
+    const field = workspace.fields.find((candidate) => candidate.id === fieldId);
+    if (!field) return;
+    setWorkspace(updateCardField(workspace, field.path, value));
+    setIgnored((entries) => entries.filter((entry) => entry.fieldId !== field.id));
+    setCardWideUndo(null);
     if (source === "restore") {
-      setAccepted((entries) => entries.filter((entry) => entry.fieldId !== selectedField.id));
+      setAccepted((entries) => entries.filter((entry) => entry.fieldId !== field.id));
       setManualFieldIds((ids) => {
         const next = new Set(ids);
-        next.delete(selectedField.id);
+        next.delete(field.id);
         return next;
       });
       return;
@@ -90,47 +185,93 @@ function App() {
     if (source === "manual") {
       setManualFieldIds((ids) => {
         const next = new Set(ids);
-        if (value === selectedField.originalValue) next.delete(selectedField.id);
-        else next.add(selectedField.id);
+        if (value === field.originalValue) next.delete(field.id);
+        else next.add(field.id);
         return next;
       });
-      if (value === selectedField.originalValue) setAccepted((entries) => entries.filter((entry) => entry.fieldId !== selectedField.id));
+      if (value === field.originalValue) setAccepted((entries) => entries.filter((entry) => entry.fieldId !== field.id));
     }
     if (source === "proposal" && applied.length > 0) {
       setAccepted((entries) => [
         ...entries,
-        ...applied.map((proposal) => ({ fieldId: selectedField.id, fieldLabel: selectedField.label, proposal }))
+        ...applied.map((proposal) => ({ fieldId: field.id, fieldLabel: field.label, proposal }))
       ]);
     }
   }
 
-  function accept(proposal: EditProposal): void {
-    if (!selectedField) return;
+  function acceptFinding(entry: LoggedFinding): void {
+    if (!workspace) return;
+    const field = workspace.fields.find((candidate) => candidate.id === entry.fieldId);
+    if (!field) return;
     try {
-      changeSelectedField(applyProposal(selectedField.value, proposal), "proposal", [proposal]);
-      setMessage(`Applied: ${proposal.explanation}`);
+      changeField(field.id, applyProposal(field.value, entry.proposal), "proposal", [entry.proposal]);
+      setMessage(`Applied in ${field.label}: ${entry.proposal.explanation}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The suggestion could not be applied.");
     }
   }
 
-  function acceptSafe(): void {
+  function acceptSafeField(): void {
     if (!selectedField) return;
     const result = applyHighConfidenceWithDetails(selectedField.value, proposals);
-    changeSelectedField(result.text, "proposal", result.applied);
-    setMessage(`Applied ${result.applied.length} high-confidence change${result.applied.length === 1 ? "" : "s"} in this field.`);
+    changeField(selectedField.id, result.text, "proposal", result.applied);
+    setMessage(`Applied ${result.applied.length} high-confidence change${result.applied.length === 1 ? "" : "s"} in ${selectedField.label}.`);
+  }
+
+  function applySafeAcrossCard(): void {
+    if (!workspace || allSafeFindings.length === 0) return;
+    const snapshot: CardWideUndo = { workspace, accepted, ignored, manualFieldIds: new Set(manualFieldIds) };
+    const result = applyHighConfidenceToCard(workspace, fromPlatform, toPlatform, ignored);
+    setWorkspace(result.workspace);
+    setAccepted((entries) => [...entries, ...result.applied]);
+    const affected = new Set(result.applied.map((entry) => entry.fieldId));
+    setIgnored((entries) => entries.filter((entry) => !affected.has(entry.fieldId)));
+    setCardWideUndo(snapshot);
+    setMessage(`Applied ${result.applied.length} safe change${result.applied.length === 1 ? "" : "s"} across the card. One-step undo is available.`);
+  }
+
+  function undoSafeAcrossCard(): void {
+    if (!cardWideUndo) return;
+    setWorkspace(cardWideUndo.workspace);
+    setAccepted(cardWideUndo.accepted);
+    setIgnored(cardWideUndo.ignored);
+    setManualFieldIds(new Set(cardWideUndo.manualFieldIds));
+    setCardWideUndo(null);
+    setMessage("Undid the last card-wide safe apply.");
   }
 
   function resetField(): void {
     if (!selectedField) return;
-    changeSelectedField(selectedField.originalValue, "restore");
+    changeField(selectedField.id, selectedField.originalValue, "restore");
     setMessage("Restored this field to its imported text.");
   }
 
-  function ignore(proposal: EditProposal): void {
-    if (!selectedField) return;
-    const entry = { fieldId: selectedField.id, fieldLabel: selectedField.label, proposal };
+  function ignoreFinding(entry: LoggedFinding): void {
     setIgnored((entries) => entries.some((current) => findingKey(current.fieldId, current.proposal) === findingKey(entry.fieldId, entry.proposal)) ? entries : [...entries, entry]);
+    setCardWideUndo(null);
+    setMessage(`Ignored one finding in ${entry.fieldLabel}.`);
+  }
+
+  function restoreFinding(entry: LoggedFinding): void {
+    const key = findingKey(entry.fieldId, entry.proposal);
+    setIgnored((entries) => entries.filter((current) => findingKey(current.fieldId, current.proposal) !== key));
+    setCardWideUndo(null);
+    setMessage(`Restored one finding in ${entry.fieldLabel}.`);
+  }
+
+  function openFindingInEditor(entry: LoggedFinding): void {
+    setSelectedFieldId(entry.fieldId);
+    setReviewAll(false);
+    setPendingSelection({ fieldId: entry.fieldId, start: entry.proposal.start, end: entry.proposal.end });
+    setTab("edit");
+    setMessage(`Opened ${entry.fieldLabel} at the selected finding.`);
+  }
+
+  function changeProfile(side: "from" | "to", value: PlatformId): void {
+    if (side === "from") setFromPlatform(value);
+    else setToPlatform(value);
+    setIgnored([]);
+    setCardWideUndo(null);
   }
 
   function exportFile(): void {
@@ -146,6 +287,15 @@ function App() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Export failed.");
     }
+  }
+
+  function exportLedger(format: "md" | "json"): void {
+    if (!workspace || !changeSummary) return;
+    const content = format === "md"
+      ? summaryToMarkdown(changeSummary, workspace.fileName)
+      : summaryToJson(changeSummary, workspace.fileName);
+    downloadBytes(new TextEncoder().encode(content), ledgerFileName(workspace.fileName, format), format === "md" ? "text/markdown" : "application/json");
+    setMessage(`${format.toUpperCase()} change ledger download started.`);
   }
 
   const resolvedPreview = selectedField ? resolvePronounMacros(selectedField.value, previewPronouns) : "";
@@ -167,7 +317,7 @@ function App() {
           <p>Choose a PNG or JSON card. Its contents stay in this browser and are not uploaded.</p>
           <button className="primary large" onClick={() => fileInput.current?.click()}>Choose card</button>
           <p className="supporting">Character Card V1, V2, and V3 detection · PNG metadata CRC validation</p>
-          <input ref={fileInput} className="visually-hidden" type="file" accept=".png,.json,image/png,application/json" onChange={(event) => {
+          <input ref={fileInput} className="visually-hidden" type="file" accept=".png,.json,image/png,application/json" onClick={(event) => { event.currentTarget.value = ""; }} onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) void loadFile(file);
           }} />
@@ -183,7 +333,7 @@ function App() {
               <button className="secondary" onClick={() => fileInput.current?.click()}>Open another card</button>
               <button className="primary" onClick={() => setTab("summary")}>Review export</button>
             </div>
-            <input ref={fileInput} className="visually-hidden" type="file" accept=".png,.json,image/png,application/json" onChange={(event) => {
+            <input ref={fileInput} className="visually-hidden" type="file" accept=".png,.json,image/png,application/json" onClick={(event) => { event.currentTarget.value = ""; }} onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void loadFile(file);
             }} />
@@ -199,22 +349,34 @@ function App() {
           <nav className="tabs" aria-label="Workspace views">
             {(["edit", "review", "preview", "summary"] as WorkspaceTab[]).map((item) => (
               <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
-                {item === "review" && proposals.length > 0 ? `Review (${proposals.length})` : item[0].toUpperCase() + item.slice(1)}
+                {item === "review" && allOpenFindings.length > 0 ? `Review (${allOpenFindings.length})` : item[0].toUpperCase() + item.slice(1)}
               </button>
             ))}
           </nav>
 
+          <label className="mobile-field-picker">
+            <span>Card field</span>
+            <select value={selectedField?.id ?? ""} onChange={(event) => setSelectedFieldId(event.target.value)}>
+              {workspace.fields.map((field) => {
+                const count = allOpenFindings.filter((entry) => entry.fieldId === field.id).length;
+                const dirty = field.value !== field.originalValue;
+                return <option key={field.id} value={field.id}>{field.label}{count ? ` · ${count} finding${count === 1 ? "" : "s"}` : ""}{dirty ? " · changed" : ""}</option>;
+              })}
+            </select>
+          </label>
+
           <section className="workspace-grid">
             <aside className="field-list">
               <div className="panel-heading"><span>Card fields</span><span>{changedFields} changed</span></div>
-              {workspace.fields.map((field) => (
-                <button key={field.id} className={selectedField?.id === field.id ? "field active" : "field"} onClick={() => {
-                  setSelectedFieldId(field.id);
-                }}>
-                  <span>{field.label}</span>
-                  {field.value !== field.originalValue && <i title="Changed">●</i>}
-                </button>
-              ))}
+              {workspace.fields.map((field) => {
+                const count = allOpenFindings.filter((entry) => entry.fieldId === field.id).length;
+                return (
+                  <button key={field.id} className={selectedField?.id === field.id ? "field active" : "field"} onClick={() => setSelectedFieldId(field.id)}>
+                    <span>{field.label}</span>
+                    <span className="field-indicators">{count > 0 && <b title={`${count} open findings`}>{count}</b>}{field.value !== field.originalValue && <i title="Changed">●</i>}</span>
+                  </button>
+                );
+              })}
               {workspace.fields.length === 0 && <p className="muted padded">No recognized editable fields were found.</p>}
             </aside>
 
@@ -225,31 +387,80 @@ function App() {
                     <div><span>{selectedField.label}</span><small>{selectedField.value.length.toLocaleString()} characters</small></div>
                     <button className="text-button" disabled={selectedField.value === selectedField.originalValue} onClick={resetField}>Restore field</button>
                   </div>
-                  <textarea className="editor" spellCheck="true" value={selectedField.value} onChange={(event) => changeSelectedField(event.target.value, "manual")} aria-label={`Edit ${selectedField.label}`} />
+                  <textarea ref={editor} className="editor" spellCheck="true" value={selectedField.value} onChange={(event) => changeField(selectedField.id, event.target.value, "manual")} aria-label={`Edit ${selectedField.label}`} />
                 </>
               )}
 
               {selectedField && tab === "review" && (
                 <>
                   <div className="rule-controls">
-                    <label>Convert from<select value={fromPlatform} onChange={(event) => { setFromPlatform(event.target.value as PlatformId); setIgnored([]); }}>{Object.values(platformProfiles).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+                    <label>Convert from<select value={fromPlatform} onChange={(event) => changeProfile("from", event.target.value as PlatformId)}>{Object.values(platformProfiles).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
                     <span aria-hidden="true">→</span>
-                    <label>Convert to<select value={toPlatform} onChange={(event) => { setToPlatform(event.target.value as PlatformId); setIgnored([]); }}>{Object.values(platformProfiles).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-                    <button className="secondary" disabled={!proposals.some((item) => item.actionable && item.confidence === "high")} onClick={acceptSafe}>Apply safe changes</button>
+                    <label>Convert to<select value={toPlatform} onChange={(event) => changeProfile("to", event.target.value as PlatformId)}>{Object.values(platformProfiles).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+                    {!reviewAll && <button className="secondary" disabled={!proposals.some((item) => item.actionable && item.confidence === "high")} onClick={acceptSafeField}>Apply safe changes</button>}
+                    <button className="review-all-button" onClick={() => setReviewAll((value) => !value)}>{reviewAll ? "Current field" : `Review all fields (${allOpenFindings.length})`}</button>
                   </div>
-                  <div className="proposal-list">
-                    {proposals.map((proposal) => (
-                      <article className="proposal" key={proposal.id}>
-                        <div className="proposal-meta"><span className={`confidence ${proposal.actionable ? proposal.confidence : "unresolved"}`}>{proposal.actionable ? proposal.confidence : "No target equivalent"}</span><span>{proposal.category}</span></div>
-                        <p>{proposal.explanation}</p>
-                        <div className={proposal.actionable ? "replacement" : "replacement unresolved-replacement"}><del>{proposal.before}</del><span aria-hidden="true">→</span><ins>{proposal.actionable ? proposal.after || "Remove formatting" : "Preserved exactly"}</ins></div>
-                        <div className="proposal-actions">{proposal.actionable && <button className="primary small" onClick={() => accept(proposal)}>Accept</button>}<button className="secondary small" onClick={() => ignore(proposal)}>Ignore</button></div>
-                      </article>
-                    ))}
-                    {proposals.length === 0 && fromPlatform === toPlatform && fieldFindings.length === 0 && <div className="clean-state"><span>↔</span><h2>No macro conversion active</h2><p>The source and target profiles match. Other checks found nothing in this field.</p></div>}
-                    {proposals.length === 0 && fromPlatform !== toPlatform && fieldFindings.length === 0 && <div className="clean-state"><span>✓</span><h2>No findings</h2><p>No applicable conversion or formatting findings remain in this field.</p></div>}
-                    {proposals.length === 0 && fieldFindings.length > 0 && <div className="clean-state"><span>✓</span><h2>All findings reviewed</h2><p>The findings in this field were applied or ignored.</p></div>}
-                  </div>
+
+                  {!reviewAll && (
+                    <div className="proposal-list">
+                      {proposals.map((proposal) => {
+                        const entry = { fieldId: selectedField.id, fieldLabel: selectedField.label, proposal };
+                        return <FindingCard key={findingKey(entry.fieldId, proposal)} entry={entry} onAccept={() => acceptFinding(entry)} onIgnore={() => ignoreFinding(entry)} onOpen={() => openFindingInEditor(entry)} />;
+                      })}
+                      {selectedIgnored.length > 0 && <div className="finding-group ignored-group"><h2>Ignored <span>{selectedIgnored.length}</span></h2>{selectedIgnored.map((entry) => <FindingCard key={findingKey(entry.fieldId, entry.proposal)} entry={entry} ignored onRestore={() => restoreFinding(entry)} onOpen={() => openFindingInEditor(entry)} />)}</div>}
+                      {proposals.length === 0 && selectedAccepted.length + selectedIgnored.length > 0 && <div className="clean-state"><span>✓</span><h2>All findings resolved</h2><p>Every finding in this field was accepted or ignored.</p></div>}
+                      {proposals.length === 0 && selectedAccepted.length + selectedIgnored.length === 0 && fromPlatform === toPlatform && fieldFindings.length === 0 && <div className="clean-state"><span>↔</span><h2>No applicable macro conversion</h2><p>The source and target profiles match. Other checks found nothing in this field.</p></div>}
+                      {proposals.length === 0 && selectedAccepted.length + selectedIgnored.length === 0 && fromPlatform !== toPlatform && fieldFindings.length === 0 && <div className="clean-state"><span>✓</span><h2>No findings</h2><p>No applicable conversion or formatting findings were detected in this field.</p></div>}
+                    </div>
+                  )}
+
+                  {reviewAll && (
+                    <div className="all-review">
+                      <div className="all-review-heading">
+                        <div><h2>Whole-card review</h2><p>Review findings by field, then jump to the exact source text when context is needed.</p></div>
+                        <div className="review-totals"><span><strong>{allOpenFindings.length}</strong> open</span><span><strong>{unresolvedCount}</strong> unresolved</span><span><strong>{changedFields}</strong> modified</span></div>
+                      </div>
+                      <section className="bulk-actions" aria-label="Card-wide safe apply">
+                        <div className="bulk-preview">
+                          <strong>{allSafeFindings.length} safe change{allSafeFindings.length === 1 ? "" : "s"} ready</strong>
+                          <span>{safeCategoryCounts.length > 0 ? safeCategoryCounts.map((item) => `${item.category}: ${item.count}`).join(" · ") : "Only non-overlapping, high-confidence replacements are included."}</span>
+                        </div>
+                        <div>
+                          <button className="primary" disabled={allSafeFindings.length === 0} onClick={applySafeAcrossCard}>Apply safe changes across card</button>
+                          {cardWideUndo && <button className="secondary" onClick={undoSafeAcrossCard}>Undo card-wide apply</button>}
+                        </div>
+                      </section>
+                      <div className="all-review-fields">
+                        {reviewFields.map((review) => (
+                          <details className="review-field" key={review.field.id} open={expandedReviewFields.has(review.field.id)} onToggle={(event) => {
+                            const fieldId = review.field.id;
+                            const isOpen = event.currentTarget.open;
+                            setExpandedReviewFields((ids) => {
+                              const next = new Set(ids);
+                              if (isOpen) next.add(fieldId);
+                              else next.delete(fieldId);
+                              return next;
+                            });
+                          }}>
+                            <summary>
+                              <span>{review.field.label}</span>
+                              <span className="review-field-counts">{review.open.length > 0 && <b>{review.open.length} open</b>}{review.accepted.length > 0 && <em>{review.accepted.length} accepted</em>}{review.ignored.length > 0 && <em>{review.ignored.length} ignored</em>}{review.field.value !== review.field.originalValue && <i>Changed</i>}</span>
+                            </summary>
+                            <div className="review-field-body">
+                              {Array.from(new Set(review.open.map((entry) => entry.proposal.category))).map((category) => {
+                                const entries = review.open.filter((entry) => entry.proposal.category === category);
+                                return <div className="finding-group" key={category}><h3>{category} <span>{entries.length}</span></h3>{entries.map((entry) => <FindingCard key={findingKey(entry.fieldId, entry.proposal)} entry={entry} onAccept={() => acceptFinding(entry)} onIgnore={() => ignoreFinding(entry)} onOpen={() => openFindingInEditor(entry)} />)}</div>;
+                              })}
+                              {review.ignored.length > 0 && <div className="finding-group ignored-group"><h3>Ignored <span>{review.ignored.length}</span></h3>{review.ignored.map((entry) => <FindingCard key={findingKey(entry.fieldId, entry.proposal)} entry={entry} ignored onRestore={() => restoreFinding(entry)} onOpen={() => openFindingInEditor(entry)} />)}</div>}
+                              {review.open.length === 0 && review.ignored.length === 0 && <p className="resolved-field">No open findings. This field is included because it was modified.</p>}
+                            </div>
+                          </details>
+                        ))}
+                        {reviewFields.length === 0 && fromPlatform === toPlatform && <div className="clean-state"><span>↔</span><h2>No applicable macro conversion</h2><p>The source and target profiles match, and other checks found nothing in this card.</p></div>}
+                        {reviewFields.length === 0 && fromPlatform !== toPlatform && <div className="clean-state"><span>✓</span><h2>No findings</h2><p>No applicable conversion or formatting findings were detected anywhere in this card.</p></div>}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 
@@ -260,7 +471,7 @@ function App() {
                     <section><h2>Imported</h2><div className="rendered" dangerouslySetInnerHTML={{ __html: safeMarkup(selectedField.originalValue) }} /></section>
                     <section><h2>Edited and resolved</h2><div className="rendered" dangerouslySetInnerHTML={{ __html: safeMarkup(resolvedPreview) }} /></section>
                   </div>
-                  <p className="preview-note">This is a safe approximation. Exact SillyTavern rendering compatibility will be added as a separate tested profile.</p>
+                  <p className="preview-note">This is a macro-substitution preview, not a grammatical rewrite. Exact SillyTavern rendering compatibility will be added as a separate tested profile.</p>
                 </>
               )}
 
@@ -281,7 +492,7 @@ function App() {
                     <section><h2>Ignored findings</h2>{changeSummary.ignored.length > 0 ? <ul>{changeSummary.ignored.map((entry) => <li key={findingKey(entry.fieldId, entry.proposal)}><span>{entry.fieldLabel}</span><code>{entry.proposal.before}</code></li>)}</ul> : <p className="muted">No findings were ignored.</p>}</section>
                     <section className="wide"><h2>Macros without target equivalents</h2>{changeSummary.unresolved.length > 0 ? <ul>{changeSummary.unresolved.map((entry) => <li key={findingKey(entry.fieldId, entry.proposal)}><span>{entry.fieldLabel}</span><code>{entry.proposal.before}</code><small>{entry.proposal.explanation}</small></li>)}</ul> : <p className="muted">Every recognized source macro has a target equivalent.</p>}</section>
                   </div>
-                  <div className="summary-actions"><button className="primary" onClick={exportFile}>Download verified card</button><span>The generated file will be re-imported and compared before download.</span></div>
+                  <div className="summary-actions"><button className="primary" onClick={exportFile}>Download verified card</button><button className="secondary" onClick={() => exportLedger("md")}>Download Markdown ledger</button><button className="secondary" onClick={() => exportLedger("json")}>Download JSON ledger</button><span>The card is re-imported and compared before download. Ledgers capture the current review state.</span></div>
                 </div>
               )}
             </section>

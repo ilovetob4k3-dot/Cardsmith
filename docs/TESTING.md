@@ -85,6 +85,12 @@ For warning fixtures:
 - [ ] Running the em-dash rule again produces no additional finding.
 - [ ] **Apply safe changes** applies only high-confidence, non-overlapping proposals.
 - [ ] **Apply safe changes** never applies em-dash proposals or non-actionable unresolved-macro findings.
+- [ ] **Review all fields** groups findings by field and category and reports open, unresolved, modified, accepted, and ignored states.
+- [ ] **Open in editor** selects the correct field and exact source range.
+- [ ] The card-wide safe-change preview reports the exact count and categories before applying.
+- [ ] Card-wide safe apply changes only non-overlapping, high-confidence proposals and then regenerates every affected field's findings.
+- [ ] **Undo card-wide apply** restores card text and the accepted, ignored, and manual-edit ledger state in one action.
+- [ ] Editing, accepting, ignoring, restoring, or changing profiles after card-wide apply expires its rollback snapshot.
 - [ ] Medium- and low-confidence formatting proposals require individual acceptance.
 - [ ] Ignoring one proposal does not alter the text.
 - [ ] Editing a field regenerates proposals so stale positions cannot be applied.
@@ -103,6 +109,8 @@ For every edited fixture:
 
 - [ ] **Review export** opens a whole-card summary before a download can begin.
 - [ ] The summary lists changed fields, accepted proposals by category and rule, manual edits, ignored findings, unresolved macros, selected profiles, file type, and detected card version.
+- [ ] Markdown and JSON ledger downloads describe the same current review state as the visible summary.
+- [ ] Ledger filenames preserve the source basename and use `-cardsmith-ledger.md` or `-cardsmith-ledger.json`.
 - [ ] Export produces a new `-edited` filename and leaves the original untouched.
 - [ ] The exported file re-imports into Cardsmith without an error.
 - [ ] Only accepted edits changed.
@@ -118,7 +126,8 @@ Complete these checks in current mobile Firefox and Chrome when possible:
 
 - [ ] Choosing and replacing JSON and PNG files works.
 - [ ] Long filenames and large fields do not break the layout.
-- [ ] Field tabs scroll horizontally and remain selectable.
+- [ ] The field dropdown lists every field, identifies the active field, and shows finding counts and changed states.
+- [ ] Long macro replacements scroll horizontally without visually breaking their brace structure.
 - [ ] Editing, review controls, previews, warnings, and export remain usable at phone width.
 - [ ] The edited download completes and can be located on the device.
 - [ ] The deployed application installs as a PWA.

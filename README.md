@@ -14,11 +14,14 @@ The application imports Character Card PNG and JSON files, exposes their editabl
 - Visible findings for recognized source macros that have no target equivalent
 - Malformed `user` and `char` brace normalization
 - Formatting warnings for bold, underscores, dialogue emphasis, and whitespace-safe em-dash replacement
-- Session change ledger and a mandatory whole-card summary before export
+- Whole-card review grouped by field and finding category, with direct jumps to source text
+- Card-wide high-confidence application with a single rollback snapshot
+- Session change ledger with Markdown and JSON downloads, plus a mandatory export summary
 - Resolved-pronoun preview
 - Visible warnings for recoverable import compatibility concerns
 - Offline-capable application shell
-- Mobile and desktop layouts
+- Mobile field selector with per-field finding and changed-state labels
+- Mobile and desktop layouts with non-wrapping macro comparisons
 
 All file processing happens in the browser. There is no upload endpoint, analytics service, or remote card-processing API.
 

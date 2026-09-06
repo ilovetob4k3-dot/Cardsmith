@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { importCardBytes } from "./card";
-import { buildChangeSummary, type LoggedFinding } from "./summary";
+import { buildChangeSummary, summaryToJson, summaryToMarkdown, type LoggedFinding } from "./summary";
 
 describe("whole-card change summary", () => {
   it("separates changed fields, accepted changes, manual edits, ignored findings, and unresolved macros", () => {
@@ -68,5 +68,14 @@ describe("whole-card change summary", () => {
     expect(summary.unresolved).toHaveLength(1);
     expect(summary.unresolved[0].fieldLabel).toBe("Description");
     expect(summary.unresolved[0].proposal.before).toBe("{{pronounVerbBe}}");
+
+    const markdown = summaryToMarkdown(summary, "rhea.json");
+    expect(markdown).toContain("# Cardsmith change ledger");
+    expect(markdown).toContain("Conversion status: Incomplete");
+    expect(markdown).toContain("{{pronounVerbBe}}");
+    const json = JSON.parse(summaryToJson(summary, "rhea.json"));
+    expect(json.schema).toBe("cardsmith-change-ledger-v1");
+    expect(json.fileName).toBe("rhea.json");
+    expect(json.unresolved).toHaveLength(1);
   });
 });

@@ -77,3 +77,60 @@ export function buildChangeSummary(
     unresolved
   };
 }
+
+function indented(value: string): string {
+  return value.split("\n").map((line) => `    ${line}`).join("\n");
+}
+
+function findingMarkdown(entry: LoggedFinding): string {
+  const proposal = entry.proposal;
+  const replacement = proposal.actionable ? `\n  - After:\n${indented(proposal.after || "(formatting removed)")}` : "\n  - Result: Preserved exactly";
+  return `- ${entry.fieldLabel}\n  - Rule: ${proposal.ruleId}\n  - Category: ${proposal.category}\n  - Confidence: ${proposal.confidence}\n  - Before:\n${indented(proposal.before)}${replacement}`;
+}
+
+export function summaryToMarkdown(summary: CardChangeSummary, fileName: string): string {
+  const changed = summary.changedFields.length > 0 ? summary.changedFields.map((field) => `- ${field.label}`).join("\n") : "- None";
+  const accepted = summary.acceptedByRule.length > 0
+    ? summary.acceptedByRule.map((rule) => `- ${rule.category} / ${rule.ruleId}: ${rule.count}`).join("\n")
+    : "- None";
+  const manual = summary.manualFields.length > 0 ? summary.manualFields.map((field) => `- ${field.label}`).join("\n") : "- None";
+  const ignored = summary.ignored.length > 0 ? summary.ignored.map(findingMarkdown).join("\n") : "- None";
+  const unresolved = summary.unresolved.length > 0 ? summary.unresolved.map(findingMarkdown).join("\n") : "- None";
+
+  return `# Cardsmith change ledger
+
+- File: ${fileName}
+- Format: ${summary.source.toUpperCase()}
+- Card version: ${summary.version.toUpperCase()}
+- Conversion: ${summary.fromProfile} → ${summary.toProfile}
+- Conversion status: ${summary.unresolved.length > 0 ? "Incomplete — one or more recognized macros have no target equivalent" : "No unresolved recognized macros"}
+
+## Changed fields
+
+${changed}
+
+## Accepted proposals by category and rule
+
+${accepted}
+
+## Manual edits
+
+${manual}
+
+## Ignored findings
+
+${ignored}
+
+## Macros without target equivalents
+
+${unresolved}
+`;
+}
+
+export function summaryToJson(summary: CardChangeSummary, fileName: string): string {
+  return `${JSON.stringify({
+    schema: "cardsmith-change-ledger-v1",
+    fileName,
+    ...summary
+  }, null, 2)}\n`;
+}

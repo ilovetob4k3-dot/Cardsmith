@@ -17,3 +17,9 @@ export function editedFileName(fileName: string): string {
   const dot = fileName.lastIndexOf(".");
   return dot > 0 ? `${fileName.slice(0, dot)}-edited${fileName.slice(dot)}` : `${fileName}-edited`;
 }
+
+export function ledgerFileName(fileName: string, extension: "md" | "json"): string {
+  const dot = fileName.lastIndexOf(".");
+  const base = dot > 0 ? fileName.slice(0, dot) : fileName;
+  return `${base}-cardsmith-ledger.${extension}`;
+}
