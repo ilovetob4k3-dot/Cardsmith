@@ -10,7 +10,7 @@ function makeProposal(
   confidence: EditProposal["confidence"],
   explanation: string
 ): EditProposal {
-  return { id: `${ruleId}:${start}:${before}`, ruleId, category, start, end: start + before.length, before, after, confidence, explanation };
+  return { id: `${ruleId}:${start}:${before}`, ruleId, category, start, end: start + before.length, before, after, confidence, actionable: true, explanation };
 }
 
 function collectRegex(text: string, regex: RegExp, create: (match: RegExpExecArray) => EditProposal): EditProposal[] {
@@ -48,8 +48,16 @@ export function formattingProposals(text: string): EditProposal[] {
   proposals.push(...collectRegex(text, /"([^"\n]*\*[^"\n]+\*[^"\n]*)"/g, (match) =>
     makeProposal("formatting.emphasis-in-dialogue", "formatting", match.index, match[0], match[0].replace(/\*/g, ""), "medium", "Remove emphasis markers from quoted dialogue.")
   ));
-  proposals.push(...collectRegex(text, /—/g, (match) =>
-    makeProposal("punctuation.em-dash", "punctuation", match.index, match[0], ", ", "low", "Replace the em dash. A comma is only a suggestion because the best alternative depends on the sentence.")
+  proposals.push(...collectRegex(text, /[ \t]*—[ \t]*/g, (match) =>
+    makeProposal(
+      "punctuation.em-dash",
+      "punctuation",
+      match.index,
+      match[0],
+      match.index + match[0].length < text.length && !/[\r\n]/.test(text[match.index + match[0].length]) ? ", " : ",",
+      "low",
+      "Replace the em dash and normalize its surrounding horizontal whitespace. A comma is only a suggestion because the best alternative depends on the sentence."
+    )
   ));
   return proposals;
 }
@@ -60,21 +68,30 @@ export function analyzeText(text: string, from: PlatformId, to: PlatformId): Edi
 }
 
 export function applyProposal(text: string, proposal: EditProposal): string {
+  if (!proposal.actionable) {
+    throw new Error("This finding has no target equivalent and cannot be applied.");
+  }
   if (text.slice(proposal.start, proposal.end) !== proposal.before) {
     throw new Error("The text changed after this suggestion was generated. Run the checks again.");
   }
   return text.slice(0, proposal.start) + proposal.after + text.slice(proposal.end);
 }
 
-export function applyHighConfidence(text: string, proposals: EditProposal[]): string {
-  const selected = proposals.filter((proposal) => proposal.confidence === "high").sort((left, right) => right.start - left.start);
+export function applyHighConfidenceWithDetails(text: string, proposals: EditProposal[]): { text: string; applied: EditProposal[] } {
+  const selected = proposals.filter((proposal) => proposal.actionable && proposal.confidence === "high").sort((left, right) => right.start - left.start);
   let result = text;
   let earliestApplied = Number.POSITIVE_INFINITY;
+  const applied: EditProposal[] = [];
   for (const proposal of selected) {
     if (proposal.end > earliestApplied) continue;
     if (result.slice(proposal.start, proposal.end) !== proposal.before) continue;
     result = applyProposal(result, proposal);
     earliestApplied = proposal.start;
+    applied.push(proposal);
   }
-  return result;
+  return { text: result, applied: applied.reverse() };
+}
+
+export function applyHighConfidence(text: string, proposals: EditProposal[]): string {
+  return applyHighConfidenceWithDetails(text, proposals).text;
 }

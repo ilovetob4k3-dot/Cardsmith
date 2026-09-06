@@ -71,12 +71,20 @@ For warning fixtures:
 
 ## Review rules
 
-- [ ] JanitorAI macros convert to their corresponding Wyvern/SillyTavern grammatical roles.
-- [ ] Wyvern/SillyTavern macros convert to the corresponding JanitorAI roles where supported.
+- [ ] JanitorAI macros convert to their corresponding WyvernChat grammatical roles.
+- [ ] WyvernChat macros convert to the corresponding JanitorAI roles where supported.
+- [ ] The interface explains that the WyvernChat family is compatible with the SillyTavern Pronouns extension rather than presenting SillyTavern as a third macro family.
+- [ ] Every `{{pronounVerbBe}}` occurrence remains byte-for-byte intact during Wyvern-to-Janitor conversion and appears as a **No target equivalent** finding.
+- [ ] The whole-card export summary identifies every unresolved macro by field and does not describe the conversion as complete.
 - [ ] Converting from and to the same platform makes no proposals.
 - [ ] Single, triple, and incorrectly capitalized `user` and `char` braces are proposed correctly.
 - [ ] Bold asterisks, bold underscores, emphasis inside quoted dialogue, and em dashes are identified.
+- [ ] `word—word`, `word — word`, `word— word`, and `word —word` each become `word, word` after individually accepting the low-confidence proposal.
+- [ ] Repeated em dashes, Unicode text, and backtick-delimited text retain their non-dash contents exactly.
+- [ ] Em-dash matching does not consume a newline or leave a trailing replacement space at the end of a line or field.
+- [ ] Running the em-dash rule again produces no additional finding.
 - [ ] **Apply safe changes** applies only high-confidence, non-overlapping proposals.
+- [ ] **Apply safe changes** never applies em-dash proposals or non-actionable unresolved-macro findings.
 - [ ] Medium- and low-confidence formatting proposals require individual acceptance.
 - [ ] Ignoring one proposal does not alter the text.
 - [ ] Editing a field regenerates proposals so stale positions cannot be applied.
@@ -93,7 +101,9 @@ For warning fixtures:
 
 For every edited fixture:
 
-- [ ] Export produces a new `-cardsmith` filename and leaves the original untouched.
+- [ ] **Review export** opens a whole-card summary before a download can begin.
+- [ ] The summary lists changed fields, accepted proposals by category and rule, manual edits, ignored findings, unresolved macros, selected profiles, file type, and detected card version.
+- [ ] Export produces a new `-edited` filename and leaves the original untouched.
 - [ ] The exported file re-imports into Cardsmith without an error.
 - [ ] Only accepted edits changed.
 - [ ] Unknown JSON properties remain unchanged.

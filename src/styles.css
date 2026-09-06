@@ -79,9 +79,11 @@ select { padding: 8px 34px 8px 10px; color: #eef5f8; background: var(--raised); 
 .confidence.high { color: #9cebdd; background: #173f43; }
 .confidence.medium { color: #ffe1a9; background: #493a22; }
 .confidence.low { color: #f3c1c1; background: #4d2929; }
+.confidence.unresolved { color: #ffe1a9; background: #493a22; text-transform: none; }
 .replacement { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: center; padding: 10px; background: #0b1016; border-radius: 7px; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
 .replacement del { color: #ffabab; }
 .replacement ins { color: #a3eadc; text-decoration: none; }
+.unresolved-replacement del { color: #ffe1a9; text-decoration: none; }
 .proposal-actions { margin-top: 12px; display: flex; gap: 8px; }
 .clean-state { margin: auto; padding: 70px 20px; color: var(--muted); text-align: center; }
 .clean-state span { display: inline-grid; place-items: center; width: 48px; height: 48px; color: var(--cyan); border: 1px solid #2f5960; border-radius: 50%; }
@@ -94,6 +96,23 @@ select { padding: 8px 34px 8px 10px; color: #eef5f8; background: var(--raised); 
 .rendered em { color: #cad6e1; }
 .rendered code { padding: 2px 5px; color: #baf2e9; background: #14252a; border: 1px solid #24434a; border-radius: 4px; font: .92em ui-monospace, monospace; }
 .preview-note { margin: 0; padding: 14px 22px; color: var(--muted); border-top: 1px solid var(--line); font-size: .82rem; }
+.summary-panel { min-width: 0; overflow-y: auto; }
+.summary-warning { margin: 18px 18px 0; padding: 13px 15px; color: #ffe1a9; background: #241d13; border: 1px solid #654b28; border-radius: 9px; line-height: 1.5; }
+.summary-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 18px; overflow: hidden; background: var(--line); border: 1px solid var(--line); border-radius: 10px; }
+.summary-facts > div { min-width: 0; padding: 13px 15px; display: flex; flex-direction: column; gap: 5px; background: var(--panel); }
+.summary-facts span { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
+.summary-facts strong { overflow-wrap: anywhere; }
+.summary-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 18px 18px; }
+.summary-sections section { min-width: 0; padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.summary-sections section.wide { grid-column: 1 / -1; }
+.summary-sections h2 { margin: 0 0 12px; font-size: .9rem; }
+.summary-sections ul { margin: 0; padding: 0; display: grid; gap: 8px; list-style: none; }
+.summary-sections li { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: #dce6ef; }
+.summary-sections li code { padding: 3px 6px; overflow-x: auto; color: #baf2e9; background: #0b1016; border-radius: 4px; font-size: .78rem; white-space: nowrap; }
+.summary-sections li small { flex: 1; color: var(--muted); line-height: 1.45; }
+.summary-sections p { margin: 0; }
+.summary-actions { padding: 16px 18px; display: flex; align-items: center; gap: 14px; border-top: 1px solid var(--line); }
+.summary-actions span { color: var(--muted); font-size: .8rem; }
 .status { min-height: 36px; padding: 8px clamp(16px, 4vw, 38px); display: flex; justify-content: space-between; gap: 20px; color: #aab8c7; background: #090c10; border-top: 1px solid var(--line); font-size: .78rem; }
 .status.error { color: var(--danger); }
 .muted { color: var(--muted); }
@@ -122,6 +141,11 @@ select { padding: 8px 34px 8px 10px; color: #eef5f8; background: var(--raised); 
   .rule-controls button { grid-column: 1 / -1; }
   .preview-columns { display: block; }
   .preview-columns section + section { border-left: 0; border-top: 1px solid var(--line); }
+  .summary-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-sections { grid-template-columns: 1fr; }
+  .summary-sections section.wide { grid-column: auto; }
+  .summary-sections li { align-items: flex-start; flex-direction: column; }
+  .summary-actions { align-items: stretch; flex-direction: column; }
   .status { position: sticky; bottom: 0; display: block; }
   .status span:last-child { display: none; }
 }

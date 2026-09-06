@@ -2,10 +2,11 @@ import { useMemo, useRef, useState } from "react";
 import { exportCardBytes, importCardBytes, updateCardField } from "./core/card";
 import { downloadBytes, editedFileName } from "./core/download";
 import { platformProfiles, resolvePronounMacros, type PlatformId, type PreviewPronouns } from "./core/macros";
-import { analyzeText, applyHighConfidence, applyProposal } from "./core/rules";
+import { analyzeText, applyHighConfidenceWithDetails, applyProposal } from "./core/rules";
+import { buildChangeSummary, findingKey, type LoggedFinding } from "./core/summary";
 import type { EditProposal, ImportedCard } from "./core/types";
 
-type WorkspaceTab = "edit" | "review" | "preview";
+type WorkspaceTab = "edit" | "review" | "preview" | "summary";
 const releaseLabel = `v${__APP_VERSION__} alpha`;
 
 function safeMarkup(text: string): string {
@@ -36,21 +37,35 @@ function App() {
   const [toPlatform, setToPlatform] = useState<PlatformId>("wyvern");
   const [previewPronouns, setPreviewPronouns] = useState<PreviewPronouns>("she");
   const [message, setMessage] = useState("No file loaded");
-  const [ignored, setIgnored] = useState<Set<string>>(new Set());
+  const [accepted, setAccepted] = useState<LoggedFinding[]>([]);
+  const [ignored, setIgnored] = useState<LoggedFinding[]>([]);
+  const [manualFieldIds, setManualFieldIds] = useState<Set<string>>(new Set());
 
   const selectedField = workspace?.fields.find((field) => field.id === selectedFieldId) ?? workspace?.fields[0];
+  const fieldFindings = useMemo(
+    () => selectedField ? analyzeText(selectedField.value, fromPlatform, toPlatform) : [],
+    [selectedField, fromPlatform, toPlatform]
+  );
   const proposals = useMemo(
-    () => selectedField ? analyzeText(selectedField.value, fromPlatform, toPlatform).filter((proposal) => !ignored.has(proposal.id)) : [],
-    [selectedField, fromPlatform, toPlatform, ignored]
+    () => selectedField
+      ? fieldFindings.filter((proposal) => !ignored.some((entry) => findingKey(entry.fieldId, entry.proposal) === findingKey(selectedField.id, proposal)))
+      : [],
+    [selectedField, fieldFindings, ignored]
   );
   const changedFields = workspace?.fields.filter((field) => field.value !== field.originalValue).length ?? 0;
+  const changeSummary = useMemo(
+    () => workspace ? buildChangeSummary(workspace, fromPlatform, toPlatform, accepted, ignored, manualFieldIds) : null,
+    [workspace, fromPlatform, toPlatform, accepted, ignored, manualFieldIds]
+  );
 
   async function loadFile(file: File): Promise<void> {
     try {
       const imported = importCardBytes(file.name, new Uint8Array(await file.arrayBuffer()));
       setWorkspace(imported);
       setSelectedFieldId(imported.fields[0]?.id ?? "");
-      setIgnored(new Set());
+      setAccepted([]);
+      setIgnored([]);
+      setManualFieldIds(new Set());
       setTab("edit");
       const warningSummary = imported.warnings.length > 0 ? ` · ${imported.warnings.length} warning${imported.warnings.length === 1 ? "" : "s"}` : "";
       setMessage(`${imported.version.toUpperCase()} ${imported.source.toUpperCase()} loaded locally${warningSummary}`);
@@ -59,16 +74,40 @@ function App() {
     }
   }
 
-  function changeSelectedField(value: string): void {
+  function changeSelectedField(value: string, source: "manual" | "proposal" | "restore", applied: EditProposal[] = []): void {
     if (!workspace || !selectedField) return;
     setWorkspace(updateCardField(workspace, selectedField.path, value));
-    setIgnored(new Set());
+    setIgnored((entries) => entries.filter((entry) => entry.fieldId !== selectedField.id));
+    if (source === "restore") {
+      setAccepted((entries) => entries.filter((entry) => entry.fieldId !== selectedField.id));
+      setManualFieldIds((ids) => {
+        const next = new Set(ids);
+        next.delete(selectedField.id);
+        return next;
+      });
+      return;
+    }
+    if (source === "manual") {
+      setManualFieldIds((ids) => {
+        const next = new Set(ids);
+        if (value === selectedField.originalValue) next.delete(selectedField.id);
+        else next.add(selectedField.id);
+        return next;
+      });
+      if (value === selectedField.originalValue) setAccepted((entries) => entries.filter((entry) => entry.fieldId !== selectedField.id));
+    }
+    if (source === "proposal" && applied.length > 0) {
+      setAccepted((entries) => [
+        ...entries,
+        ...applied.map((proposal) => ({ fieldId: selectedField.id, fieldLabel: selectedField.label, proposal }))
+      ]);
+    }
   }
 
   function accept(proposal: EditProposal): void {
     if (!selectedField) return;
     try {
-      changeSelectedField(applyProposal(selectedField.value, proposal));
+      changeSelectedField(applyProposal(selectedField.value, proposal), "proposal", [proposal]);
       setMessage(`Applied: ${proposal.explanation}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The suggestion could not be applied.");
@@ -77,14 +116,21 @@ function App() {
 
   function acceptSafe(): void {
     if (!selectedField) return;
-    changeSelectedField(applyHighConfidence(selectedField.value, proposals));
-    setMessage("Applied high-confidence changes in this field.");
+    const result = applyHighConfidenceWithDetails(selectedField.value, proposals);
+    changeSelectedField(result.text, "proposal", result.applied);
+    setMessage(`Applied ${result.applied.length} high-confidence change${result.applied.length === 1 ? "" : "s"} in this field.`);
   }
 
   function resetField(): void {
     if (!selectedField) return;
-    changeSelectedField(selectedField.originalValue);
+    changeSelectedField(selectedField.originalValue, "restore");
     setMessage("Restored this field to its imported text.");
+  }
+
+  function ignore(proposal: EditProposal): void {
+    if (!selectedField) return;
+    const entry = { fieldId: selectedField.id, fieldLabel: selectedField.label, proposal };
+    setIgnored((entries) => entries.some((current) => findingKey(current.fieldId, current.proposal) === findingKey(entry.fieldId, entry.proposal)) ? entries : [...entries, entry]);
   }
 
   function exportFile(): void {
@@ -134,8 +180,8 @@ function App() {
               <div><strong>{workspace.fileName}</strong><small>{workspace.version.toUpperCase()} · {formatSize(workspace.originalBytes.length)} · {workspace.fields.length} editable fields</small></div>
             </div>
             <div className="file-actions">
-              <button className="secondary" onClick={() => fileInput.current?.click()}>Replace</button>
-              <button className="primary" onClick={exportFile}>Export edited card</button>
+              <button className="secondary" onClick={() => fileInput.current?.click()}>Open another card</button>
+              <button className="primary" onClick={() => setTab("summary")}>Review export</button>
             </div>
             <input ref={fileInput} className="visually-hidden" type="file" accept=".png,.json,image/png,application/json" onChange={(event) => {
               const file = event.target.files?.[0];
@@ -151,7 +197,7 @@ function App() {
           )}
 
           <nav className="tabs" aria-label="Workspace views">
-            {(["edit", "review", "preview"] as WorkspaceTab[]).map((item) => (
+            {(["edit", "review", "preview", "summary"] as WorkspaceTab[]).map((item) => (
               <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
                 {item === "review" && proposals.length > 0 ? `Review (${proposals.length})` : item[0].toUpperCase() + item.slice(1)}
               </button>
@@ -164,7 +210,6 @@ function App() {
               {workspace.fields.map((field) => (
                 <button key={field.id} className={selectedField?.id === field.id ? "field active" : "field"} onClick={() => {
                   setSelectedFieldId(field.id);
-                  setIgnored(new Set());
                 }}>
                   <span>{field.label}</span>
                   {field.value !== field.originalValue && <i title="Changed">●</i>}
@@ -180,28 +225,30 @@ function App() {
                     <div><span>{selectedField.label}</span><small>{selectedField.value.length.toLocaleString()} characters</small></div>
                     <button className="text-button" disabled={selectedField.value === selectedField.originalValue} onClick={resetField}>Restore field</button>
                   </div>
-                  <textarea className="editor" spellCheck="true" value={selectedField.value} onChange={(event) => changeSelectedField(event.target.value)} aria-label={`Edit ${selectedField.label}`} />
+                  <textarea className="editor" spellCheck="true" value={selectedField.value} onChange={(event) => changeSelectedField(event.target.value, "manual")} aria-label={`Edit ${selectedField.label}`} />
                 </>
               )}
 
               {selectedField && tab === "review" && (
                 <>
                   <div className="rule-controls">
-                    <label>Convert from<select value={fromPlatform} onChange={(event) => setFromPlatform(event.target.value as PlatformId)}>{Object.values(platformProfiles).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+                    <label>Convert from<select value={fromPlatform} onChange={(event) => { setFromPlatform(event.target.value as PlatformId); setIgnored([]); }}>{Object.values(platformProfiles).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
                     <span aria-hidden="true">→</span>
-                    <label>Convert to<select value={toPlatform} onChange={(event) => setToPlatform(event.target.value as PlatformId)}>{Object.values(platformProfiles).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-                    <button className="secondary" disabled={!proposals.some((item) => item.confidence === "high")} onClick={acceptSafe}>Apply safe changes</button>
+                    <label>Convert to<select value={toPlatform} onChange={(event) => { setToPlatform(event.target.value as PlatformId); setIgnored([]); }}>{Object.values(platformProfiles).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+                    <button className="secondary" disabled={!proposals.some((item) => item.actionable && item.confidence === "high")} onClick={acceptSafe}>Apply safe changes</button>
                   </div>
                   <div className="proposal-list">
                     {proposals.map((proposal) => (
                       <article className="proposal" key={proposal.id}>
-                        <div className="proposal-meta"><span className={`confidence ${proposal.confidence}`}>{proposal.confidence}</span><span>{proposal.category}</span></div>
+                        <div className="proposal-meta"><span className={`confidence ${proposal.actionable ? proposal.confidence : "unresolved"}`}>{proposal.actionable ? proposal.confidence : "No target equivalent"}</span><span>{proposal.category}</span></div>
                         <p>{proposal.explanation}</p>
-                        <div className="replacement"><del>{proposal.before}</del><span aria-hidden="true">→</span><ins>{proposal.after || "Remove formatting"}</ins></div>
-                        <div className="proposal-actions"><button className="primary small" onClick={() => accept(proposal)}>Accept</button><button className="secondary small" onClick={() => setIgnored(new Set([...ignored, proposal.id]))}>Ignore</button></div>
+                        <div className={proposal.actionable ? "replacement" : "replacement unresolved-replacement"}><del>{proposal.before}</del><span aria-hidden="true">→</span><ins>{proposal.actionable ? proposal.after || "Remove formatting" : "Preserved exactly"}</ins></div>
+                        <div className="proposal-actions">{proposal.actionable && <button className="primary small" onClick={() => accept(proposal)}>Accept</button>}<button className="secondary small" onClick={() => ignore(proposal)}>Ignore</button></div>
                       </article>
                     ))}
-                    {proposals.length === 0 && <div className="clean-state"><span>✓</span><h2>No current suggestions</h2><p>This field has no findings from the enabled foundation rules.</p></div>}
+                    {proposals.length === 0 && fromPlatform === toPlatform && fieldFindings.length === 0 && <div className="clean-state"><span>↔</span><h2>No macro conversion active</h2><p>The source and target profiles match. Other checks found nothing in this field.</p></div>}
+                    {proposals.length === 0 && fromPlatform !== toPlatform && fieldFindings.length === 0 && <div className="clean-state"><span>✓</span><h2>No findings</h2><p>No applicable conversion or formatting findings remain in this field.</p></div>}
+                    {proposals.length === 0 && fieldFindings.length > 0 && <div className="clean-state"><span>✓</span><h2>All findings reviewed</h2><p>The findings in this field were applied or ignored.</p></div>}
                   </div>
                 </>
               )}
@@ -215,6 +262,27 @@ function App() {
                   </div>
                   <p className="preview-note">This is a safe approximation. Exact SillyTavern rendering compatibility will be added as a separate tested profile.</p>
                 </>
+              )}
+
+              {changeSummary && tab === "summary" && (
+                <div className="summary-panel">
+                  <div className="panel-heading"><div><span>Whole-card export summary</span><small>Review the complete saved result before downloading</small></div></div>
+                  {changeSummary.unresolved.length > 0 && <div className="summary-warning"><strong>Conversion is incomplete.</strong> {changeSummary.unresolved.length} recognized macro occurrence{changeSummary.unresolved.length === 1 ? " has" : "s have"} no target equivalent and will be preserved.</div>}
+                  <div className="summary-facts">
+                    <div><span>File</span><strong>{changeSummary.source.toUpperCase()} · {changeSummary.version.toUpperCase()}</strong></div>
+                    <div><span>Profiles</span><strong>{changeSummary.fromProfile} → {changeSummary.toProfile}</strong></div>
+                    <div><span>Changed fields</span><strong>{changeSummary.changedFields.length}</strong></div>
+                    <div><span>Accepted proposals</span><strong>{changeSummary.accepted.length}</strong></div>
+                  </div>
+                  <div className="summary-sections">
+                    <section><h2>Changed fields</h2>{changeSummary.changedFields.length > 0 ? <ul>{changeSummary.changedFields.map((field) => <li key={field.id}>{field.label}</li>)}</ul> : <p className="muted">No fields differ from the imported card.</p>}</section>
+                    <section><h2>Accepted proposals by rule</h2>{changeSummary.acceptedByRule.length > 0 ? <ul>{changeSummary.acceptedByRule.map((rule) => <li key={`${rule.category}:${rule.ruleId}`}><code>{rule.category} · {rule.ruleId}</code><span>{rule.count}</span></li>)}</ul> : <p className="muted">No proposals were accepted.</p>}</section>
+                    <section><h2>Manual edits</h2>{changeSummary.manualFields.length > 0 ? <ul>{changeSummary.manualFields.map((field) => <li key={field.id}>{field.label}</li>)}</ul> : <p className="muted">No changed fields contain manual edits.</p>}</section>
+                    <section><h2>Ignored findings</h2>{changeSummary.ignored.length > 0 ? <ul>{changeSummary.ignored.map((entry) => <li key={findingKey(entry.fieldId, entry.proposal)}><span>{entry.fieldLabel}</span><code>{entry.proposal.before}</code></li>)}</ul> : <p className="muted">No findings were ignored.</p>}</section>
+                    <section className="wide"><h2>Macros without target equivalents</h2>{changeSummary.unresolved.length > 0 ? <ul>{changeSummary.unresolved.map((entry) => <li key={findingKey(entry.fieldId, entry.proposal)}><span>{entry.fieldLabel}</span><code>{entry.proposal.before}</code><small>{entry.proposal.explanation}</small></li>)}</ul> : <p className="muted">Every recognized source macro has a target equivalent.</p>}</section>
+                  </div>
+                  <div className="summary-actions"><button className="primary" onClick={exportFile}>Download verified card</button><span>The generated file will be re-imported and compared before download.</span></div>
+                </div>
               )}
             </section>
           </section>

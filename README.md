@@ -10,9 +10,11 @@ The application imports Character Card PNG and JSON files, exposes their editabl
 - PNG `chara` and `ccv3` metadata decoding
 - Lossless preservation of unrelated PNG chunks and unknown JSON fields
 - Editable prompt-field discovery, including alternate greetings and lorebook entries
-- JanitorAI and Wyvern/SillyTavern pronoun-macro conversion proposals
+- JanitorAI and WyvernChat pronoun-macro conversion proposals, compatible with the SillyTavern Pronouns extension
+- Visible findings for recognized source macros that have no target equivalent
 - Malformed `user` and `char` brace normalization
-- Formatting warnings for bold, underscores, dialogue emphasis, and em dashes
+- Formatting warnings for bold, underscores, dialogue emphasis, and whitespace-safe em-dash replacement
+- Session change ledger and a mandatory whole-card summary before export
 - Resolved-pronoun preview
 - Visible warnings for recoverable import compatibility concerns
 - Offline-capable application shell
@@ -32,6 +34,7 @@ Validation:
 ```bash
 npm test
 npm run build
+npm audit --omit=dev
 ```
 
 ## Deployment

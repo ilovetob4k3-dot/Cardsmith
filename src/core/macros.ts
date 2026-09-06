@@ -23,7 +23,7 @@ export const platformProfiles: Record<PlatformId, PlatformProfile> = {
   },
   wyvern: {
     id: "wyvern",
-    name: "Wyvern / ST Pronouns",
+    name: "WyvernChat macros (SillyTavern extension compatible)",
     macros: {
       subject: "{{pronounSubjective}}",
       object: "{{pronounObjective}}",
@@ -47,19 +47,23 @@ export function macroConversionProposals(text: string, from: PlatformId, to: Pla
   for (const role of roleOrder) {
     const before = platformProfiles[from].macros[role];
     const after = platformProfiles[to].macros[role];
-    if (!before || !after) continue;
+    if (!before) continue;
     let start = text.indexOf(before);
     while (start >= 0) {
+      const actionable = Boolean(after);
       proposals.push({
-        id: proposalId(`macro.${from}.${to}.${role}`, start, before),
-        ruleId: `macro.${from}.${to}.${role}`,
+        id: proposalId(`macro.${actionable ? "convert" : "unresolved"}.${from}.${to}.${role}`, start, before),
+        ruleId: `macro.${actionable ? "convert" : "unresolved"}.${from}.${to}.${role}`,
         category: "macro",
         start,
         end: start + before.length,
         before,
-        after,
+        after: after ?? before,
         confidence: "high",
-        explanation: `Convert the ${role.replace(/([A-Z])/g, " $1").toLowerCase()} macro to ${platformProfiles[to].name}.`
+        actionable,
+        explanation: actionable
+          ? `Convert the ${role.replace(/([A-Z])/g, " $1").toLowerCase()} macro to ${platformProfiles[to].name}.`
+          : `No target equivalent exists for the ${role.replace(/([A-Z])/g, " $1").toLowerCase()} macro in ${platformProfiles[to].name}. It will be preserved exactly.`
       });
       start = text.indexOf(before, start + before.length);
     }

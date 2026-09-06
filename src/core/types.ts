@@ -43,5 +43,6 @@ export interface EditProposal {
   before: string;
   after: string;
   confidence: Confidence;
+  actionable: boolean;
   explanation: string;
 }

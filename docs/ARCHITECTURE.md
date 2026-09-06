@@ -19,15 +19,17 @@ The default application is a static web app. Card bytes are read through the bro
 - `png.ts` owns PNG chunk parsing, CRC validation, card metadata selection, and chunk reconstruction.
 - `macros.ts` owns platform macro profiles and resolved-pronoun previews.
 - `rules.ts` emits source-positioned edit proposals and applies accepted proposals.
+- `summary.ts` derives the whole-card export report from final field values and the session ledger.
 - The React app owns transient interaction state only. Card-format logic should remain UI-independent so it can later be reused by a SillyTavern extension and command-line batch tool.
 
 ## Next engineering slices
 
-1. Add golden fixtures from real V1, V2, and V3 cards with sensitive text removed.
-2. Add IndexedDB sessions, explicit recovery packages, and an edit ledger.
-3. Replace the approximate preview with a tested SillyTavern-compatible pipeline.
-4. Add a tolerant Markdown scanner for nested and malformed asterisks and underscores.
-5. Add field-level formatting profiles and written-content backtick suggestions.
-6. Add referent-aware pronoun proposals with user, character, NPC, and plural labels.
-7. Add ZIP export and resumable batch processing in a Web Worker.
-8. Add the SillyTavern extension wrapper around the shared core.
+1. Add whole-card review, card-wide high-confidence application, and one-step card-wide undo.
+2. Replace the mobile field strip with a discoverable field drawer or dropdown carrying finding and dirty-state counts.
+3. Add dedicated PNG `chara`/`ccv3` and V3 fixtures, then complete destination-application round trips.
+4. Replace the approximate preview with tested JanitorAI-visible and SillyTavern-visible modes.
+5. Add a tolerant Markdown scanner for nested and malformed asterisks and underscores.
+6. Add field-level formatting profiles and written-content backtick suggestions.
+7. Add referent-aware pronoun proposals with user, character, NPC, and plural labels.
+8. Add IndexedDB sessions, explicit recovery packages, reusable ledger downloads, and ZIP batch export.
+9. Add the SillyTavern extension wrapper around the shared core.
