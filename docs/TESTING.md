@@ -28,6 +28,7 @@ npm audit --omit=dev
 - [ ] The audit reports no unresolved production vulnerabilities.
 - [ ] The built `dist/index.html` uses `/Cardsmith/` asset paths.
 - [ ] The built manifest uses `/Cardsmith/` for its ID, start URL, and scope.
+- [ ] A custom-domain simulation built with `VITE_BASE_PATH=/` uses root asset paths and `/` for the manifest ID, start URL, and scope.
 
 ## Test fixture set
 

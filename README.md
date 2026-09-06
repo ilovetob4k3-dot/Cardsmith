@@ -42,7 +42,7 @@ Pull requests and pushes to `main` run the test and production-build checks. Pub
 2. Open **Actions**, select **Deploy Cardsmith to Pages**, and run the workflow.
 3. Complete the smoke checks in [`docs/TESTING.md`](docs/TESTING.md) against the deployed URL.
 
-The production base path is `/Cardsmith/`, matching the repository name.
+The default production base path is `/Cardsmith/`, matching the repository name. The Pages workflow reads GitHub's configured base path at build time, so an individual custom domain automatically uses `/` instead. To add one later, configure the domain and DNS under **Settings → Pages**; this Actions-based deployment does not require a committed `CNAME` file.
 
 ## Release testing
 
