@@ -35,7 +35,30 @@ export const platformProfiles: Record<PlatformId, PlatformProfile> = {
   }
 };
 
-const roleOrder: MacroRole[] = ["subject", "object", "possessiveDeterminer", "possessivePronoun", "reflexive", "verbBe"];
+export const roleOrder: MacroRole[] = ["subject", "object", "possessiveDeterminer", "possessivePronoun", "reflexive", "verbBe"];
+
+export interface MacroReferenceRow {
+  role: MacroRole;
+  label: string;
+  janitor: string | null;
+  wyvern: string | null;
+}
+
+const roleLabels: Record<MacroRole, string> = {
+  subject: "Subject",
+  object: "Object",
+  possessiveDeterminer: "Possessive determiner",
+  possessivePronoun: "Possessive pronoun",
+  reflexive: "Reflexive",
+  verbBe: "Form of “be”"
+};
+
+export const macroReferenceRows: MacroReferenceRow[] = roleOrder.map((role) => ({
+  role,
+  label: roleLabels[role],
+  janitor: platformProfiles.janitor.macros[role] ?? null,
+  wyvern: platformProfiles.wyvern.macros[role] ?? null
+}));
 
 function proposalId(ruleId: string, start: number, before: string): string {
   return `${ruleId}:${start}:${before}`;

@@ -8,8 +8,11 @@ import {
   safeCardFindings
 } from "./core/cardReview";
 import { downloadBytes, editedFileName, ledgerFileName } from "./core/download";
-import { platformProfiles, resolvePronounMacros, type PlatformId, type PreviewPronouns } from "./core/macros";
-import { applyHighConfidenceWithDetails, applyProposal } from "./core/rules";
+import { macroReferenceRows, platformProfiles, type PlatformId, type PreviewPronouns } from "./core/macros";
+import type { ThoughtConvention } from "./core/markdown";
+import { renderPreview, type PreviewMode } from "./core/preview";
+import type { GenderShift, PronounOutputTarget, ReferentScope } from "./core/pronouns";
+import { applyHighConfidenceWithDetails, applyProposal, type AnalysisOptions } from "./core/rules";
 import {
   buildChangeSummary,
   findingKey,
@@ -19,7 +22,7 @@ import {
 } from "./core/summary";
 import type { EditProposal, ImportedCard } from "./core/types";
 
-type WorkspaceTab = "edit" | "review" | "preview" | "summary";
+type WorkspaceTab = "edit" | "review" | "preview" | "reference" | "summary";
 type ChangeSource = "manual" | "proposal" | "restore";
 
 interface PendingSelection {
@@ -67,11 +70,12 @@ function formatSize(length: number): string {
 
 function FindingCard({ entry, ignored, onAccept, onIgnore, onRestore, onOpen }: FindingCardProps) {
   const proposal = entry.proposal;
+  const findingLabel = proposal.findingLabel ?? (proposal.category === "macro" ? "No target equivalent" : "Manual review");
   return (
     <article className={ignored ? "proposal ignored-proposal" : "proposal"}>
       <div className="proposal-meta">
         <span className={`confidence ${ignored ? "ignored" : proposal.actionable ? proposal.confidence : "unresolved"}`}>
-          {ignored ? "Ignored" : proposal.actionable ? proposal.confidence : "No target equivalent"}
+          {ignored ? "Ignored" : proposal.actionable ? proposal.confidence : findingLabel}
         </span>
         <span>{proposal.category}</span>
       </div>
@@ -101,6 +105,14 @@ function App() {
   const [fromPlatform, setFromPlatform] = useState<PlatformId>("janitor");
   const [toPlatform, setToPlatform] = useState<PlatformId>("wyvern");
   const [previewPronouns, setPreviewPronouns] = useState<PreviewPronouns>("she");
+  const [previewMode, setPreviewMode] = useState<PreviewMode>("raw");
+  const [formattingEnabled, setFormattingEnabled] = useState(true);
+  const [thoughtConvention, setThoughtConvention] = useState<ThoughtConvention>("unchanged");
+  const [pronounTarget, setPronounTarget] = useState<PronounOutputTarget>("off");
+  const [referentScope, setReferentScope] = useState<ReferentScope>("user");
+  const [referentName, setReferentName] = useState("");
+  const [genderShift, setGenderShift] = useState<GenderShift>("off");
+  const [reviewBodyDescriptors, setReviewBodyDescriptors] = useState(false);
   const [message, setMessage] = useState("No file loaded");
   const [accepted, setAccepted] = useState<LoggedFinding[]>([]);
   const [ignored, setIgnored] = useState<LoggedFinding[]>([]);
@@ -109,10 +121,21 @@ function App() {
   const [cardWideUndo, setCardWideUndo] = useState<CardWideUndo | null>(null);
   const [expandedReviewFields, setExpandedReviewFields] = useState<Set<string>>(new Set());
 
+  const analysisOptions = useMemo<AnalysisOptions>(() => ({
+    formatting: { enabled: formattingEnabled, thoughtConvention },
+    pronouns: {
+      target: pronounTarget,
+      referent: referentScope,
+      name: referentName,
+      genderShift,
+      reviewBodyDescriptors
+    }
+  }), [formattingEnabled, thoughtConvention, pronounTarget, referentScope, referentName, genderShift, reviewBodyDescriptors]);
+
   const selectedField = workspace?.fields.find((field) => field.id === selectedFieldId) ?? workspace?.fields[0];
   const cardReviews = useMemo(
-    () => workspace ? analyzeCard(workspace, fromPlatform, toPlatform) : [],
-    [workspace, fromPlatform, toPlatform]
+    () => workspace ? analyzeCard(workspace, fromPlatform, toPlatform, analysisOptions) : [],
+    [workspace, fromPlatform, toPlatform, analysisOptions]
   );
   const allOpenFindings = useMemo(() => openCardFindings(cardReviews, ignored), [cardReviews, ignored]);
   const allSafeFindings = useMemo(() => safeCardFindings(cardReviews, ignored), [cardReviews, ignored]);
@@ -125,10 +148,11 @@ function App() {
   const selectedAccepted = selectedField ? accepted.filter((entry) => entry.fieldId === selectedField.id) : [];
   const selectedIgnored = selectedField ? ignored.filter((entry) => entry.fieldId === selectedField.id) : [];
   const changedFields = cardReviews.filter((review) => review.dirty).length;
-  const unresolvedCount = cardReviews.reduce((count, review) => count + review.findings.filter((proposal) => !proposal.actionable).length, 0);
+  const unresolvedCount = cardReviews.reduce((count, review) => count + review.findings.filter((proposal) => !proposal.actionable && proposal.category === "macro").length, 0);
+  const manualReviewCount = allOpenFindings.filter((entry) => !entry.proposal.actionable && entry.proposal.category !== "macro").length;
   const changeSummary = useMemo(
-    () => workspace ? buildChangeSummary(workspace, fromPlatform, toPlatform, accepted, ignored, manualFieldIds) : null,
-    [workspace, fromPlatform, toPlatform, accepted, ignored, manualFieldIds]
+    () => workspace ? buildChangeSummary(workspace, fromPlatform, toPlatform, accepted, ignored, manualFieldIds, analysisOptions) : null,
+    [workspace, fromPlatform, toPlatform, accepted, ignored, manualFieldIds, analysisOptions]
   );
   const reviewFields = useMemo(() => workspace?.fields.map((field) => ({
     field,
@@ -221,7 +245,7 @@ function App() {
   function applySafeAcrossCard(): void {
     if (!workspace || allSafeFindings.length === 0) return;
     const snapshot: CardWideUndo = { workspace, accepted, ignored, manualFieldIds: new Set(manualFieldIds) };
-    const result = applyHighConfidenceToCard(workspace, fromPlatform, toPlatform, ignored);
+    const result = applyHighConfidenceToCard(workspace, fromPlatform, toPlatform, ignored, analysisOptions);
     setWorkspace(result.workspace);
     setAccepted((entries) => [...entries, ...result.applied]);
     const affected = new Set(result.applied.map((entry) => entry.fieldId));
@@ -274,6 +298,11 @@ function App() {
     setCardWideUndo(null);
   }
 
+  function resetAnalysisState(): void {
+    setIgnored([]);
+    setCardWideUndo(null);
+  }
+
   function exportFile(): void {
     if (!workspace) return;
     try {
@@ -291,14 +320,40 @@ function App() {
 
   function exportLedger(format: "md" | "json"): void {
     if (!workspace || !changeSummary) return;
-    const content = format === "md"
-      ? summaryToMarkdown(changeSummary, workspace.fileName)
-      : summaryToJson(changeSummary, workspace.fileName);
-    downloadBytes(new TextEncoder().encode(content), ledgerFileName(workspace.fileName, format), format === "md" ? "text/markdown" : "application/json");
-    setMessage(`${format.toUpperCase()} change ledger download started.`);
+    try {
+      const content = format === "md"
+        ? summaryToMarkdown(changeSummary, workspace.fileName)
+        : summaryToJson(changeSummary, workspace.fileName);
+      downloadBytes(new TextEncoder().encode(content), ledgerFileName(workspace.fileName, format), format === "md" ? "text/markdown" : "application/json");
+      setMessage(`${format.toUpperCase()} change ledger download started.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Ledger download failed.");
+    }
   }
 
-  const resolvedPreview = selectedField ? resolvePronounMacros(selectedField.value, previewPronouns) : "";
+  async function copyText(value: string): Promise<void> {
+    let copied = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        copied = true;
+      }
+    } catch { /* Try the browser's legacy local-copy path below. */ }
+    if (!copied) {
+      const helper = document.createElement("textarea");
+      try {
+        helper.value = value;
+        helper.className = "clipboard-helper";
+        document.body.append(helper);
+        helper.select();
+        copied = document.execCommand("copy");
+      } catch { copied = false; }
+      finally { helper.remove(); }
+    }
+    setMessage(copied ? `Copied ${value}.` : "Clipboard access was blocked. Select the macro text and copy it manually.");
+  }
+
+  const previewResult = selectedField ? renderPreview(selectedField.value, previewMode, previewPronouns) : null;
 
   return (
     <main className="app-shell">
@@ -347,9 +402,9 @@ function App() {
           )}
 
           <nav className="tabs" aria-label="Workspace views">
-            {(["edit", "review", "preview", "summary"] as WorkspaceTab[]).map((item) => (
+            {(["edit", "review", "preview", "reference", "summary"] as WorkspaceTab[]).map((item) => (
               <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
-                {item === "review" && allOpenFindings.length > 0 ? `Review (${allOpenFindings.length})` : item[0].toUpperCase() + item.slice(1)}
+                {item === "review" && allOpenFindings.length > 0 ? `Review (${allOpenFindings.length})` : item === "reference" ? "Macros" : item[0].toUpperCase() + item.slice(1)}
               </button>
             ))}
           </nav>
@@ -400,6 +455,19 @@ function App() {
                     {!reviewAll && <button className="secondary" disabled={!proposals.some((item) => item.actionable && item.confidence === "high")} onClick={acceptSafeField}>Apply safe changes</button>}
                     <button className="review-all-button" onClick={() => setReviewAll((value) => !value)}>{reviewAll ? "Current field" : `Review all fields (${allOpenFindings.length})`}</button>
                   </div>
+                  <details className="analysis-settings">
+                    <summary>Formatting and referent-aware checks</summary>
+                    <div className="settings-grid">
+                      <label className="checkbox-control"><input type="checkbox" checked={formattingEnabled} onChange={(event) => { setFormattingEnabled(event.target.checked); resetAnalysisState(); }} /><span>Formatting profile</span><small>Single-italic actions, plain dialogue, and backtick display cues</small></label>
+                      <label>Thought convention<select value={thoughtConvention} disabled={!formattingEnabled} onChange={(event) => { setThoughtConvention(event.target.value as ThoughtConvention); resetAnalysisState(); }}><option value="unchanged">Leave thoughts unchanged</option><option value="backticks">Backticks</option><option value="italics">Single italics</option><option value="plain">Plain text</option></select></label>
+                      <label>Plain pronoun output<select value={pronounTarget} onChange={(event) => { setPronounTarget(event.target.value as PronounOutputTarget); resetAnalysisState(); }}><option value="off">Off</option><option value="janitor">JanitorAI macros</option><option value="wyvern">Wyvern / ST extension macros</option><option value="she">she / her</option><option value="he">he / him</option><option value="they">they / them</option></select></label>
+                      <label>Pronoun referent<select value={referentScope} onChange={(event) => { setReferentScope(event.target.value as ReferentScope); resetAnalysisState(); }}><option value="user">User only</option><option value="char">Character only</option><option value="named">Named person</option><option value="any-singular">Any singular referent</option></select></label>
+                      {referentScope === "named" && <label>Person name<input value={referentName} onChange={(event) => { setReferentName(event.target.value); resetAnalysisState(); }} placeholder="Exact name" /></label>}
+                      <label>Gendered terms<select value={genderShift} onChange={(event) => { setGenderShift(event.target.value as GenderShift); resetAnalysisState(); }}><option value="off">Off</option><option value="feminine">Feminine</option><option value="masculine">Masculine</option><option value="neutral">Neutral</option></select></label>
+                      <label className="checkbox-control"><input type="checkbox" checked={reviewBodyDescriptors} onChange={(event) => { setReviewBodyDescriptors(event.target.checked); resetAnalysisState(); }} /><span>Flag body descriptors</span><small>Review-only; Cardsmith will not invent replacements</small></label>
+                    </div>
+                    <p>Formatting, pronoun, and gender suggestions always require individual approval. Ambiguous, plural, and unknown references are preserved.</p>
+                  </details>
 
                   {!reviewAll && (
                     <div className="proposal-list">
@@ -418,7 +486,7 @@ function App() {
                     <div className="all-review">
                       <div className="all-review-heading">
                         <div><h2>Whole-card review</h2><p>Review findings by field, then jump to the exact source text when context is needed.</p></div>
-                        <div className="review-totals"><span><strong>{allOpenFindings.length}</strong> open</span><span><strong>{unresolvedCount}</strong> unresolved</span><span><strong>{changedFields}</strong> modified</span></div>
+                        <div className="review-totals"><span><strong>{allOpenFindings.length}</strong> open</span><span><strong>{unresolvedCount}</strong> unsupported macros</span><span><strong>{manualReviewCount}</strong> manual review</span><span><strong>{changedFields}</strong> modified</span></div>
                       </div>
                       <section className="bulk-actions" aria-label="Card-wide safe apply">
                         <div className="bulk-preview">
@@ -466,13 +534,31 @@ function App() {
 
               {selectedField && tab === "preview" && (
                 <>
-                  <div className="preview-controls"><label>Resolve macros as<select value={previewPronouns} onChange={(event) => setPreviewPronouns(event.target.value as PreviewPronouns)}><option value="she">she / her</option><option value="he">he / him</option><option value="they">they / them</option></select></label></div>
-                  <div className="preview-columns">
-                    <section><h2>Imported</h2><div className="rendered" dangerouslySetInnerHTML={{ __html: safeMarkup(selectedField.originalValue) }} /></section>
-                    <section><h2>Edited and resolved</h2><div className="rendered" dangerouslySetInnerHTML={{ __html: safeMarkup(resolvedPreview) }} /></section>
+                  <div className="preview-controls">
+                    <label>Preview mode<select value={previewMode} onChange={(event) => setPreviewMode(event.target.value as PreviewMode)}><option value="raw">Raw source</option><option value="janitor">Janitor user-visible</option><option value="sillytavern">SillyTavern user-visible</option></select></label>
+                    <label>Resolve macros as<select value={previewPronouns} disabled={previewMode === "raw"} onChange={(event) => setPreviewPronouns(event.target.value as PreviewPronouns)}><option value="she">she / her</option><option value="he">he / him</option><option value="they">they / them</option></select></label>
+                    {previewResult && previewMode !== "raw" && <span className="preview-stat">{previewResult.hiddenSegments} hidden segment{previewResult.hiddenSegments === 1 ? "" : "s"}</span>}
                   </div>
-                  <p className="preview-note">This is a macro-substitution preview, not a grammatical rewrite. Exact SillyTavern rendering compatibility will be added as a separate tested profile.</p>
+                  <div className="preview-columns">
+                    <section><h2>Imported source</h2><div className="rendered source-view">{selectedField.originalValue}</div></section>
+                    <section><h2>{previewMode === "raw" ? "Edited source" : previewMode === "janitor" ? "Janitor user-visible" : "SillyTavern user-visible"}</h2>{previewMode === "raw" ? <div className="rendered source-view">{previewResult?.text}</div> : <div className="rendered" dangerouslySetInnerHTML={{ __html: safeMarkup(previewResult?.text ?? "") }} />}</section>
+                  </div>
+                  <p className="preview-note">Platform views hide display-only source segments and substitute labels for macros without changing the card. Pronoun preview is not a grammatical rewrite. Unclosed hide markers remain visible for review.</p>
                 </>
+              )}
+
+              {tab === "reference" && (
+                <div className="reference-panel">
+                  <div className="panel-heading"><div><span>Pronoun macro reference</span><small>Two supported syntax families</small></div></div>
+                  <p className="reference-intro">SillyTavern uses the WyvernChat macro family through its Pronouns extension; it is not modeled as a third syntax. Copy a token without changing the card.</p>
+                  <div className="reference-table-wrap">
+                    <table className="reference-table">
+                      <thead><tr><th scope="col">Grammar role</th><th scope="col">JanitorAI</th><th scope="col">Wyvern / ST extension</th></tr></thead>
+                      <tbody>{macroReferenceRows.map((row) => <tr key={row.role}><th scope="row">{row.label}</th><td>{row.janitor ? <div className="macro-cell"><code>{row.janitor}</code><button className="secondary small" aria-label={`Copy JanitorAI ${row.label} macro`} onClick={() => void copyText(row.janitor!)}>Copy</button></div> : <span className="unsupported">No equivalent</span>}</td><td>{row.wyvern ? <div className="macro-cell"><code>{row.wyvern}</code><button className="secondary small" aria-label={`Copy Wyvern ${row.label} macro`} onClick={() => void copyText(row.wyvern!)}>Copy</button></div> : <span className="unsupported">No equivalent</span>}</td></tr>)}</tbody>
+                    </table>
+                  </div>
+                  <p className="preview-note">Unsupported roles are preserved exactly during conversion and appear in Review and the export ledger.</p>
+                </div>
               )}
 
               {changeSummary && tab === "summary" && (
@@ -490,6 +576,7 @@ function App() {
                     <section><h2>Accepted proposals by rule</h2>{changeSummary.acceptedByRule.length > 0 ? <ul>{changeSummary.acceptedByRule.map((rule) => <li key={`${rule.category}:${rule.ruleId}`}><code>{rule.category} · {rule.ruleId}</code><span>{rule.count}</span></li>)}</ul> : <p className="muted">No proposals were accepted.</p>}</section>
                     <section><h2>Manual edits</h2>{changeSummary.manualFields.length > 0 ? <ul>{changeSummary.manualFields.map((field) => <li key={field.id}>{field.label}</li>)}</ul> : <p className="muted">No changed fields contain manual edits.</p>}</section>
                     <section><h2>Ignored findings</h2>{changeSummary.ignored.length > 0 ? <ul>{changeSummary.ignored.map((entry) => <li key={findingKey(entry.fieldId, entry.proposal)}><span>{entry.fieldLabel}</span><code>{entry.proposal.before}</code></li>)}</ul> : <p className="muted">No findings were ignored.</p>}</section>
+                    <section className="wide"><h2>Manual review findings</h2>{changeSummary.reviewRequired.length > 0 ? <ul>{changeSummary.reviewRequired.map((entry) => <li key={findingKey(entry.fieldId, entry.proposal)}><span>{entry.fieldLabel}</span><code>{entry.proposal.before}</code><small>{entry.proposal.explanation}</small></li>)}</ul> : <p className="muted">No ambiguous formatting, referent, or body-description findings remain.</p>}</section>
                     <section className="wide"><h2>Macros without target equivalents</h2>{changeSummary.unresolved.length > 0 ? <ul>{changeSummary.unresolved.map((entry) => <li key={findingKey(entry.fieldId, entry.proposal)}><span>{entry.fieldLabel}</span><code>{entry.proposal.before}</code><small>{entry.proposal.explanation}</small></li>)}</ul> : <p className="muted">Every recognized source macro has a target equivalent.</p>}</section>
                   </div>
                   <div className="summary-actions"><button className="primary" onClick={exportFile}>Download verified card</button><button className="secondary" onClick={() => exportLedger("md")}>Download Markdown ledger</button><button className="secondary" onClick={() => exportLedger("json")}>Download JSON ledger</button><span>The card is re-imported and compared before download. Ledgers capture the current review state.</span></div>
@@ -500,7 +587,7 @@ function App() {
         </>
       )}
 
-      <footer className={message.toLowerCase().includes("failed") || message.toLowerCase().includes("invalid") ? "status error" : "status"} aria-live="polite">
+      <footer className={message.toLowerCase().includes("failed") || message.toLowerCase().includes("invalid") || message.toLowerCase().includes("blocked") ? "status error" : "status"} aria-live="polite">
         <span>{message}</span>
         {workspace && <span>Original retained in memory · {changedFields} field{changedFields === 1 ? "" : "s"} changed</span>}
       </footer>

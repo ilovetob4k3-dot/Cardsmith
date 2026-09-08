@@ -92,6 +92,13 @@ For warning fixtures:
 - [ ] **Undo card-wide apply** restores card text and the accepted, ignored, and manual-edit ledger state in one action.
 - [ ] Editing, accepting, ignoring, restoring, or changing profiles after card-wide apply expires its rollback snapshot.
 - [ ] Medium- and low-confidence formatting proposals require individual acceptance.
+- [ ] The tolerant Markdown scanner distinguishes valid action italics, swallowed dialogue, dialogue emphasis, nested/malformed emphasis, escaped literals, and unmatched delimiters.
+- [ ] Escaped asterisks and underscores, macro code, backticks, template code, and HTML comments are preserved.
+- [ ] Ambiguous Markdown repairs and all plain-pronoun or gender-term replacements remain outside card-wide safe apply.
+- [ ] The formatting profile keeps dialogue plain, proposes single-asterisk action italics, proposes backticks for displayed text, and changes thoughts only after a convention is selected.
+- [ ] Plain-pronoun review distinguishes user, character, named, plural, and unknown referents plus subject, object, possessive, and reflexive roles.
+- [ ] Plural and unknown referents are preserved as manual-review findings.
+- [ ] Gendered terms and body descriptors produce no findings until their separate opt-in controls are enabled; body descriptors remain review-only.
 - [ ] Ignoring one proposal does not alter the text.
 - [ ] Editing a field regenerates proposals so stale positions cannot be applied.
 
@@ -102,6 +109,13 @@ For warning fixtures:
 - [ ] She/her, he/him, and they/them previews resolve both supported macro families.
 - [ ] Actions and backtick-delimited written text render distinctly.
 - [ ] HTML-like card text is escaped and cannot execute markup or scripts.
+- [ ] Raw/source mode preserves every source character and performs no macro substitution.
+- [ ] Janitor user-visible mode hides only complete tilde-hidden segments.
+- [ ] SillyTavern user-visible mode hides only complete HTML comments.
+- [ ] Hidden preview material remains unchanged in Edit and in the exported card.
+- [ ] Explicit verb macros such as `{{pronounVerbBe}}` still resolve where the selected macro family supports them.
+- [ ] Preview copy states that substitution does not repair subject-verb agreement.
+- [ ] The Macros reference shows exactly JanitorAI and WyvernChat/Pronouns-extension families, supports one-tap copy, and labels the unsupported JanitorAI form-of-“be” mapping.
 
 ## Export integrity
 
@@ -130,6 +144,8 @@ Complete these checks in current mobile Firefox and Chrome when possible:
 - [ ] Long macro replacements scroll horizontally without visually breaking their brace structure.
 - [ ] Editing, review controls, previews, warnings, and export remain usable at phone width.
 - [ ] The edited download completes and can be located on the device.
+- [ ] A blocked download reports instructions to allow site downloads and check the Downloads folder.
+- [ ] Firefox Android download behavior is recorded as tested before release notes claim support.
 - [ ] The deployed application installs as a PWA.
 - [ ] The installed PWA opens at `/Cardsmith/` rather than the account root.
 - [ ] After one successful online load, the application shell opens offline.

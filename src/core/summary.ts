@@ -1,5 +1,5 @@
 import { platformProfiles, type PlatformId } from "./macros";
-import { analyzeText } from "./rules";
+import { analyzeText, type AnalysisOptions } from "./rules";
 import type { EditProposal, ImportedCard } from "./types";
 
 export interface LoggedFinding {
@@ -30,6 +30,7 @@ export interface CardChangeSummary {
   manualFields: SummaryField[];
   ignored: LoggedFinding[];
   unresolved: LoggedFinding[];
+  reviewRequired: LoggedFinding[];
 }
 
 export function findingKey(fieldId: string, proposal: EditProposal): string {
@@ -42,7 +43,8 @@ export function buildChangeSummary(
   to: PlatformId,
   accepted: LoggedFinding[],
   ignored: LoggedFinding[],
-  manualFieldIds: Set<string>
+  manualFieldIds: Set<string>,
+  options: AnalysisOptions = {}
 ): CardChangeSummary {
   const changedFields = workspace.fields
     .filter((field) => field.value !== field.originalValue)
@@ -51,11 +53,14 @@ export function buildChangeSummary(
   const manualFields = workspace.fields
     .filter((field) => changedIds.has(field.id) && manualFieldIds.has(field.id))
     .map((field) => ({ id: field.id, label: field.label }));
-  const unresolved = workspace.fields.flatMap((field) =>
-    analyzeText(field.value, from, to)
+  const findings = workspace.fields.flatMap((field) =>
+    analyzeText(field.value, from, to, { ...options, formatting: { ...options.formatting, fieldLabel: field.label } })
       .filter((proposal) => !proposal.actionable)
       .map((proposal) => ({ fieldId: field.id, fieldLabel: field.label, proposal }))
   );
+  const unresolved = findings.filter((entry) => entry.proposal.category === "macro");
+  const ignoredKeys = new Set(ignored.map((entry) => findingKey(entry.fieldId, entry.proposal)));
+  const reviewRequired = findings.filter((entry) => entry.proposal.category !== "macro" && !ignoredKeys.has(findingKey(entry.fieldId, entry.proposal)));
   const grouped = new Map<string, AcceptedRuleSummary>();
   for (const entry of accepted) {
     const key = `${entry.proposal.category}:${entry.proposal.ruleId}`;
@@ -74,7 +79,8 @@ export function buildChangeSummary(
     acceptedByRule: [...grouped.values()],
     manualFields,
     ignored,
-    unresolved
+    unresolved,
+    reviewRequired
   };
 }
 
@@ -96,6 +102,7 @@ export function summaryToMarkdown(summary: CardChangeSummary, fileName: string):
   const manual = summary.manualFields.length > 0 ? summary.manualFields.map((field) => `- ${field.label}`).join("\n") : "- None";
   const ignored = summary.ignored.length > 0 ? summary.ignored.map(findingMarkdown).join("\n") : "- None";
   const unresolved = summary.unresolved.length > 0 ? summary.unresolved.map(findingMarkdown).join("\n") : "- None";
+  const reviewRequired = summary.reviewRequired.length > 0 ? summary.reviewRequired.map(findingMarkdown).join("\n") : "- None";
 
   return `# Cardsmith change ledger
 
@@ -124,6 +131,10 @@ ${ignored}
 ## Macros without target equivalents
 
 ${unresolved}
+
+## Manual review findings
+
+${reviewRequired}
 `;
 }
 

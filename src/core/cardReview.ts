@@ -1,6 +1,6 @@
 import { updateCardField } from "./card";
 import type { PlatformId } from "./macros";
-import { analyzeText, applyHighConfidenceWithDetails } from "./rules";
+import { analyzeText, applyHighConfidenceWithDetails, type AnalysisOptions } from "./rules";
 import { findingKey, type LoggedFinding } from "./summary";
 import type { EditProposal, ImportedCard } from "./types";
 
@@ -23,13 +23,17 @@ export interface CardWideApplyResult {
   applied: LoggedFinding[];
 }
 
-export function analyzeCard(workspace: ImportedCard, from: PlatformId, to: PlatformId): CardFieldReview[] {
+function optionsForField(options: AnalysisOptions, fieldLabel: string): AnalysisOptions {
+  return { ...options, formatting: { ...options.formatting, fieldLabel } };
+}
+
+export function analyzeCard(workspace: ImportedCard, from: PlatformId, to: PlatformId, options: AnalysisOptions = {}): CardFieldReview[] {
   return workspace.fields.map((field) => ({
     fieldId: field.id,
     fieldLabel: field.label,
     value: field.value,
     dirty: field.value !== field.originalValue,
-    findings: analyzeText(field.value, from, to)
+    findings: analyzeText(field.value, from, to, optionsForField(options, field.label))
   }));
 }
 
@@ -60,14 +64,15 @@ export function applyHighConfidenceToCard(
   workspace: ImportedCard,
   from: PlatformId,
   to: PlatformId,
-  ignored: LoggedFinding[] = []
+  ignored: LoggedFinding[] = [],
+  options: AnalysisOptions = {}
 ): CardWideApplyResult {
   const ignoredKeys = new Set(ignored.map((entry) => findingKey(entry.fieldId, entry.proposal)));
   let next = workspace;
   const applied: LoggedFinding[] = [];
 
   for (const field of workspace.fields) {
-    const proposals = analyzeText(field.value, from, to).filter((proposal) => !ignoredKeys.has(findingKey(field.id, proposal)));
+    const proposals = analyzeText(field.value, from, to, optionsForField(options, field.label)).filter((proposal) => !ignoredKeys.has(findingKey(field.id, proposal)));
     const result = applyHighConfidenceWithDetails(field.value, proposals);
     if (result.applied.length === 0) continue;
     next = updateCardField(next, field.path, result.text);

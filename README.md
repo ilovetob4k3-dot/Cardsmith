@@ -13,15 +13,19 @@ The application imports Character Card PNG and JSON files, exposes their editabl
 - JanitorAI and WyvernChat pronoun-macro conversion proposals, compatible with the SillyTavern Pronouns extension
 - Visible findings for recognized source macros that have no target equivalent
 - Malformed `user` and `char` brace normalization
-- Formatting warnings for bold, underscores, dialogue emphasis, and whitespace-safe em-dash replacement
+- Tolerant Markdown scanning for nested, malformed, escaped, and mixed emphasis syntax
+- A field-aware formatting profile for action italics, plain dialogue, displayed-text backticks, and selectable thought conventions
+- Referent-aware, individually approved pronoun suggestions with separate opt-in gender-term and body-descriptor review
 - Whole-card review grouped by field and finding category, with direct jumps to source text
 - Card-wide high-confidence application with a single rollback snapshot
 - Session change ledger with Markdown and JSON downloads, plus a mandatory export summary
-- Resolved-pronoun preview
+- Raw, Janitor user-visible, and SillyTavern user-visible previews that never mutate card source
+- A two-family macro compatibility reference with copy controls and unsupported-role labels
 - Visible warnings for recoverable import compatibility concerns
 - Offline-capable application shell
 - Mobile field selector with per-field finding and changed-state labels
 - Mobile and desktop layouts with non-wrapping macro comparisons
+- Delayed object-URL cleanup and actionable blocked-download guidance
 
 All file processing happens in the browser. There is no upload endpoint, analytics service, or remote card-processing API.
 

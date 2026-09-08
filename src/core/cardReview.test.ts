@@ -61,4 +61,19 @@ describe("whole-card review", () => {
     expect(result.applied).toHaveLength(1);
     expect(findingKey(ignoredEntry.fieldId, ignoredEntry.proposal)).toContain("data.name");
   });
+
+  it("keeps referent-aware and formatting suggestions out of safe card-wide apply", () => {
+    const workspace = workspaceFor({
+      name: "Rhea",
+      description: "{{user}} adjusted their **coat**."
+    });
+    const options = { pronouns: { target: "janitor" as const, referent: "user" as const }, formatting: { enabled: true } };
+    const reviews = analyzeCard(workspace, "janitor", "janitor", options);
+    const description = reviews.find((review) => review.fieldLabel === "Description")!;
+
+    expect(description.findings.some((proposal) => proposal.category === "pronoun" && proposal.confidence === "medium")).toBe(true);
+    expect(description.findings.some((proposal) => proposal.category === "formatting" && proposal.confidence === "medium")).toBe(true);
+    expect(safeCardFindings(reviews, [])).toEqual([]);
+    expect(applyHighConfidenceToCard(workspace, "janitor", "janitor", [], options).workspace).toEqual(workspace);
+  });
 });

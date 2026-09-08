@@ -1,16 +1,28 @@
+export const DOWNLOAD_REVOKE_DELAY_MS = 60_000;
+
+export function downloadBlockedMessage(fileName: string): string {
+  return `Your browser blocked the download for ${fileName}. Allow downloads for this site, then try again. On mobile, also check the browser's Downloads folder.`;
+}
+
 export function downloadBytes(bytes: Uint8Array, fileName: string, mimeType: string): void {
   const copy = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(copy).set(bytes);
   const blob = new Blob([copy], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.rel = "noopener";
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try {
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.rel = "noopener";
+    document.body.append(anchor);
+    anchor.click();
+  } catch {
+    URL.revokeObjectURL(url);
+    throw new Error(downloadBlockedMessage(fileName));
+  } finally {
+    anchor.remove();
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_REVOKE_DELAY_MS);
 }
 
 export function editedFileName(fileName: string): string {

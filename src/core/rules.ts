@@ -1,5 +1,12 @@
 import { macroConversionProposals, type PlatformId } from "./macros";
+import { formattingProfileProposals, type FormattingProfileOptions } from "./markdown";
+import { referentAwareProposals, type PronounAnalysisOptions } from "./pronouns";
 import type { EditProposal } from "./types";
+
+export interface AnalysisOptions {
+  formatting?: FormattingProfileOptions;
+  pronouns?: PronounAnalysisOptions;
+}
 
 function makeProposal(
   ruleId: string,
@@ -37,18 +44,12 @@ export function structureProposals(text: string): EditProposal[] {
   return proposals;
 }
 
-export function formattingProposals(text: string): EditProposal[] {
-  const proposals: EditProposal[] = [];
-  proposals.push(...collectRegex(text, /\*\*([^*\n]+)\*\*/g, (match) =>
-    makeProposal("formatting.bold-asterisk", "formatting", match.index, match[0], match[1], "medium", "Remove bold formatting while preserving its text. Review whether the passage should instead be narration or displayed text.")
-  ));
-  proposals.push(...collectRegex(text, /__([^_\n]+)__/g, (match) =>
-    makeProposal("formatting.bold-underscore", "formatting", match.index, match[0], match[1], "medium", "Remove underscore-based bold formatting while preserving its text.")
-  ));
-  proposals.push(...collectRegex(text, /"([^"\n]*\*[^"\n]+\*[^"\n]*)"/g, (match) =>
-    makeProposal("formatting.emphasis-in-dialogue", "formatting", match.index, match[0], match[0].replace(/\*/g, ""), "medium", "Remove emphasis markers from quoted dialogue.")
-  ));
-  proposals.push(...collectRegex(text, /[ \t]*—[ \t]*/g, (match) =>
+export function formattingProposals(text: string, options: FormattingProfileOptions = {}): EditProposal[] {
+  return formattingProfileProposals(text, options);
+}
+
+export function punctuationProposals(text: string): EditProposal[] {
+  return collectRegex(text, /[ \t]*—[ \t]*/g, (match) =>
     makeProposal(
       "punctuation.em-dash",
       "punctuation",
@@ -58,12 +59,17 @@ export function formattingProposals(text: string): EditProposal[] {
       "low",
       "Replace the em dash and normalize its surrounding horizontal whitespace. A comma is only a suggestion because the best alternative depends on the sentence."
     )
-  ));
-  return proposals;
+  );
 }
 
-export function analyzeText(text: string, from: PlatformId, to: PlatformId): EditProposal[] {
-  return [...structureProposals(text), ...macroConversionProposals(text, from, to), ...formattingProposals(text)]
+export function analyzeText(text: string, from: PlatformId, to: PlatformId, options: AnalysisOptions = {}): EditProposal[] {
+  return [
+    ...structureProposals(text),
+    ...macroConversionProposals(text, from, to),
+    ...formattingProposals(text, options.formatting),
+    ...referentAwareProposals(text, options.pronouns),
+    ...punctuationProposals(text)
+  ]
     .sort((left, right) => left.start - right.start || left.end - right.end);
 }
 

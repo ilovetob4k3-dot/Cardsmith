@@ -17,8 +17,11 @@ The default application is a static web app. Card bytes are read through the bro
 
 - `card.ts` owns format detection, editable-field extraction, immutable field updates, and export selection.
 - `png.ts` owns PNG chunk parsing, CRC validation, card metadata selection, and chunk reconstruction.
-- `macros.ts` owns platform macro profiles and resolved-pronoun previews.
-- `rules.ts` emits source-positioned edit proposals and applies accepted proposals.
+- `macros.ts` owns the two platform macro families, the compatibility reference, and deterministic macro substitution.
+- `markdown.ts` scans tolerant Markdown and emits field-aware formatting proposals.
+- `pronouns.ts` classifies plain-pronoun referents and grammatical roles, plus opt-in gender review.
+- `preview.ts` derives raw and platform-visible text without mutating stored card content.
+- `rules.ts` composes source-positioned edit proposals and applies accepted proposals.
 - `cardReview.ts` derives field and whole-card review models and performs transactional safe application.
 - `summary.ts` derives the whole-card export report and downloadable Markdown/JSON ledgers from final field values and session state.
 - The React app owns transient interaction state only. Card-format logic should remain UI-independent so it can later be reused by a SillyTavern extension and command-line batch tool.
@@ -26,9 +29,6 @@ The default application is a static web app. Card bytes are read through the bro
 ## Next engineering slices
 
 1. Add dedicated PNG `chara`/`ccv3` and V3 fixtures, then complete destination-application round trips.
-2. Replace the approximate preview with tested JanitorAI-visible and SillyTavern-visible modes.
-3. Add a tolerant Markdown scanner for nested and malformed asterisks and underscores.
-4. Add field-level formatting profiles and written-content backtick suggestions.
-5. Add referent-aware pronoun proposals with user, character, NPC, and plural labels.
-6. Add IndexedDB sessions, explicit recovery packages, and ZIP batch export.
-7. Add the SillyTavern extension wrapper around the shared core.
+2. Exercise card downloads on the current Firefox Android browser matrix before claiming support; evaluate ZIP only if direct downloads remain unreliable.
+3. Add IndexedDB sessions, explicit recovery packages, and ZIP batch export.
+4. Add the SillyTavern extension wrapper around the shared core.

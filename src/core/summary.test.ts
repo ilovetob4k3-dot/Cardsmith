@@ -68,6 +68,7 @@ describe("whole-card change summary", () => {
     expect(summary.unresolved).toHaveLength(1);
     expect(summary.unresolved[0].fieldLabel).toBe("Description");
     expect(summary.unresolved[0].proposal.before).toBe("{{pronounVerbBe}}");
+    expect(summary.reviewRequired).toEqual([]);
 
     const markdown = summaryToMarkdown(summary, "rhea.json");
     expect(markdown).toContain("# Cardsmith change ledger");
@@ -77,5 +78,16 @@ describe("whole-card change summary", () => {
     expect(json.schema).toBe("cardsmith-change-ledger-v1");
     expect(json.fileName).toBe("rhea.json");
     expect(json.unresolved).toHaveLength(1);
+    expect(json.reviewRequired).toEqual([]);
+  });
+
+  it("separates ambiguous formatting from unsupported macros", () => {
+    const source = { spec: "chara_card_v2", data: { name: "Rhea", description: "*unfinished action" } };
+    const workspace = importCardBytes("rhea.json", new TextEncoder().encode(JSON.stringify(source)));
+    const summary = buildChangeSummary(workspace, "janitor", "wyvern", [], [], new Set(), { formatting: { enabled: true } });
+
+    expect(summary.unresolved).toEqual([]);
+    expect(summary.reviewRequired.some((entry) => entry.proposal.ruleId === "formatting.unmatched-marker")).toBe(true);
+    expect(summaryToMarkdown(summary, "rhea.json")).toContain("## Manual review findings");
   });
 });

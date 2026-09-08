@@ -37,7 +37,7 @@ export interface ImportedCard {
 export interface EditProposal {
   id: string;
   ruleId: string;
-  category: "macro" | "formatting" | "punctuation" | "structure";
+  category: "macro" | "formatting" | "pronoun" | "gender" | "punctuation" | "structure";
   start: number;
   end: number;
   before: string;
@@ -45,4 +45,5 @@ export interface EditProposal {
   confidence: Confidence;
   actionable: boolean;
   explanation: string;
+  findingLabel?: string;
 }
