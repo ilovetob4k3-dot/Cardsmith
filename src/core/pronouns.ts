@@ -21,6 +21,11 @@ interface CandidateContext {
   number: NumberKind;
 }
 
+interface Range {
+  start: number;
+  end: number;
+}
+
 const fixedPronouns: Record<PreviewPronouns, Record<Exclude<MacroRole, "verbBe">, string>> = {
   she: { subject: "she", object: "her", possessiveDeterminer: "her", possessivePronoun: "hers", reflexive: "herself" },
   he: { subject: "he", object: "him", possessiveDeterminer: "his", possessivePronoun: "his", reflexive: "himself" },
@@ -61,15 +66,21 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function isProtected(text: string, index: number): boolean {
-  const patterns = [/<!--[^]*?(?:-->|$)/g, /`+[^\n]*?`+/g, /<%[^]*?(?:%>|$)/g, /\$\{[^\n}]*\}/g];
-  return patterns.some((pattern) => {
+function protectedRanges(text: string): Range[] {
+  const patterns = [/<!--[^]*?(?:-->|$)/g, /`+[^\n]*?`+/g, /<%[^]*?(?:%>|$)/g, /\$\{[^\n}]*\}/g, /\{\{[^\n}]*\}\}/g];
+  return patterns.flatMap((pattern) => {
+    const ranges: Range[] = [];
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(text))) {
-      if (index >= match.index && index < match.index + match[0].length) return true;
+      ranges.push({ start: match.index, end: match.index + match[0].length });
+      if (match[0].length === 0) pattern.lastIndex += 1;
     }
-    return false;
-  });
+    return ranges;
+  }).sort((left, right) => left.start - right.start);
+}
+
+function isProtected(ranges: Range[], index: number): boolean {
+  return ranges.some((range) => index >= range.start && index < range.end);
 }
 
 function latestMatchIndex(value: string, expression: RegExp): number {
@@ -111,7 +122,14 @@ function pronounRole(text: string, token: string, end: number): Exclude<MacroRol
   if (["hers", "theirs"].includes(normalized)) return "possessivePronoun";
   if (["herself", "himself", "themself", "themselves"].includes(normalized)) return "reflexive";
   if (normalized === "her" || normalized === "his" || normalized === "their") {
-    return /^\s+[\p{L}\p{N}]/u.test(text.slice(end)) ? "possessiveDeterminer" : normalized === "her" ? "object" : "possessivePronoun";
+    const tail = text.slice(end);
+    const nextWord = /^\s+([\p{L}\p{N}'-]+)/u.exec(tail)?.[1]?.toLowerCase();
+    const objectFollower = nextWord && (
+      /ly$/.test(nextWord) ||
+      ["a", "an", "the", "this", "that", "these", "those", "some", "any", "each", "every", "today", "yesterday", "tomorrow", "now", "again", "here", "there", "away", "back"].includes(nextWord)
+    );
+    if (!nextWord || objectFollower) return normalized === "her" ? "object" : "possessivePronoun";
+    return "possessiveDeterminer";
   }
   return "object";
 }
@@ -168,12 +186,13 @@ export function referentAwareProposals(text: string, options: PronounAnalysisOpt
   const scope = options.referent ?? "user";
   const name = options.name ?? "";
   const proposals: EditProposal[] = [];
+  const protectedSpans = protectedRanges(text);
 
   if (target !== "off") {
     const expression = /\b(?:she|her|hers|herself|he|him|his|himself|they|them|their|theirs|themself|themselves)\b/gi;
     let match: RegExpExecArray | null;
     while ((match = expression.exec(text))) {
-      if (isProtected(text, match.index)) continue;
+      if (isProtected(protectedSpans, match.index)) continue;
       const before = match[0];
       const context = candidateContext(text, match.index, before, name);
       if (context.referent !== "unknown" && context.referent !== "group" && scope !== "any-singular" && context.referent !== scope) continue;
@@ -199,28 +218,50 @@ export function referentAwareProposals(text: string, options: PronounAnalysisOpt
   }
 
   if (genderShift !== "off") {
+    const candidates = new Map<string, { start: number; before: string; replacements: Set<string> }>();
     for (const terms of genderTerms) {
       const sources = Array.from(new Set([terms.feminine, terms.masculine, terms.neutral]));
       for (const source of sources) {
         const expression = new RegExp(`\\b${escapeRegExp(source)}\\b`, "gi");
         let match: RegExpExecArray | null;
         while ((match = expression.exec(text))) {
-          if (isProtected(text, match.index)) continue;
+          if (isProtected(protectedSpans, match.index)) continue;
           const context = candidateContext(text, match.index, match[0], name);
           if (!scopeMatches({ ...context, number: context.referent === "group" ? "plural" : "singular" }, scope)) continue;
           const replacement = preserveCapitalization(match[0], terms[genderShift]);
           if (replacement.toLowerCase() === match[0].toLowerCase()) continue;
-          proposals.push(proposal(
+          const key = `${match.index}:${match.index + match[0].length}:${match[0].toLowerCase()}`;
+          const candidate = candidates.get(key) ?? { start: match.index, before: match[0], replacements: new Set<string>() };
+          candidate.replacements.add(replacement);
+          candidates.set(key, candidate);
+        }
+      }
+    }
+    for (const candidate of candidates.values()) {
+      const replacements = [...candidate.replacements];
+      if (replacements.length > 1) {
+        proposals.push(proposal(
+          `gender.term.${scope}.${genderShift}.ambiguous`,
+          "gender",
+          candidate.start,
+          candidate.before,
+          candidate.before,
+          `This neutral term has multiple possible ${genderShift} forms (${replacements.join(" or ")}). Choose the relationship-specific wording manually.`,
+          false,
+          "low",
+          "Ambiguous gender term"
+        ));
+      } else {
+        proposals.push(proposal(
             `gender.term.${scope}.${genderShift}`,
             "gender",
-            match.index,
-            match[0],
-            replacement,
+            candidate.start,
+            candidate.before,
+            replacements[0],
             `This gendered noun appears connected to the selected ${scope} referent. Review the relationship and tone before changing it.`,
             true,
             "low"
-          ));
-        }
+        ));
       }
     }
   }
@@ -230,7 +271,7 @@ export function referentAwareProposals(text: string, options: PronounAnalysisOpt
       const expression = new RegExp(`\\b${escapeRegExp(descriptor)}\\b`, "gi");
       let match: RegExpExecArray | null;
       while ((match = expression.exec(text))) {
-        if (isProtected(text, match.index)) continue;
+        if (isProtected(protectedSpans, match.index)) continue;
         const context = candidateContext(text, match.index, match[0], name);
         if (!scopeMatches({ ...context, number: context.referent === "group" ? "plural" : "singular" }, scope)) continue;
         proposals.push(proposal(

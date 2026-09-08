@@ -35,6 +35,20 @@ describe("referent-aware pronoun suggestions", () => {
     expect(referentAwareProposals(text, { target: "they", referent: "user" }).map((item) => item.after)).toEqual(["they", "their", "themself"]);
   });
 
+  it("protects all double-brace template spans while retaining referent cues", () => {
+    const proposals = referentAwareProposals("{{user}} records {{their}} value, then checks their notes.", { target: "janitor", referent: "user" });
+    expect(proposals.map((item) => item.before)).toEqual(["their"]);
+    expect(proposals[0].after).toBe("{{poss}}");
+  });
+
+  it("classifies object her before adverbs or determiners without guessing possessive wording", () => {
+    const adverb = referentAwareProposals("Rowan spoke to her yesterday.", { target: "janitor", referent: "named", name: "Rowan" });
+    const determiner = referentAwareProposals("Rowan gave her the book.", { target: "janitor", referent: "named", name: "Rowan" });
+    expect(adverb).toHaveLength(1);
+    expect(adverb[0]).toMatchObject({ after: "{{obj}}", ruleId: "pronoun.replace.named.janitor.object" });
+    expect(determiner[0]).toMatchObject({ after: "{{obj}}", ruleId: "pronoun.replace.named.janitor.object" });
+  });
+
   it("keeps gendered terms opt-in and body descriptors review-only", () => {
     const text = "{{char}} is a woman and queen with an hourglass figure.";
     const proposals = referentAwareProposals(text, {
@@ -47,8 +61,24 @@ describe("referent-aware pronoun suggestions", () => {
     expect(proposals[2]).toMatchObject({ actionable: false, findingLabel: "Body descriptor review" });
   });
 
+  it("preserves ambiguous neutral gender terms for relationship-specific manual review", () => {
+    const proposals = referentAwareProposals("{{char}} protects a child.", {
+      target: "off",
+      referent: "char",
+      genderShift: "feminine"
+    });
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]).toMatchObject({
+      before: "child",
+      after: "child",
+      actionable: false,
+      findingLabel: "Ambiguous gender term"
+    });
+    expect(proposals[0].explanation).toContain("girl or daughter");
+  });
+
   it("does not inspect macros, code, template syntax, or HTML comments", () => {
-    const text = "`{{user}} told them` <!-- {{user}} told them --> <% them %> ${them}";
+    const text = "`{{user}} told them` <!-- {{user}} told them --> <% them %> ${them} {{their}}";
     expect(referentAwareProposals(text, { target: "she", referent: "user" })).toEqual([]);
   });
 });

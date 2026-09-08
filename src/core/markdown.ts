@@ -84,9 +84,14 @@ function scanMatches(
 }
 
 function unescapedMarkerCount(line: string, marker: "*" | "_"): number {
+  if (marker === "*" && /^\s*\*{3,}\s*$/.test(line)) return 0;
+  const bulletIndex = marker === "*" ? line.search(/\S/) : -1;
   let count = 0;
   for (let index = 0; index < line.length; index += 1) {
-    if (line[index] === marker && !isEscaped(line, index)) count += 1;
+    if (line[index] !== marker || isEscaped(line, index)) continue;
+    if (index === bulletIndex && /^\*\s/.test(line.slice(index))) continue;
+    if (/[\p{L}\p{N}]/u.test(line[index - 1] ?? "") && /[\p{L}\p{N}]/u.test(line[index + 1] ?? "")) continue;
+    count += 1;
   }
   return count;
 }
@@ -104,7 +109,8 @@ export function scanMarkdown(text: string): MarkdownIssue[] {
 
   let lineStart = 0;
   for (const line of text.split("\n")) {
-    const nestedAsterisk = /^\*(?=[^\n]*\*[^\n]*\*\*$)(?![^\n]*\\\*\*$)[^\n]+\*\*$/.exec(line);
+    const asteriskBullet = /^\s*\*\s/.test(line);
+    const nestedAsterisk = asteriskBullet ? null : /^\*(?!\*)(?=[^\n]*\*[^\n]*\*\*$)(?![^\n]*\\\*\*$)[^\n]+\*\*$/.exec(line);
     if (nestedAsterisk) addIssue(issues, protectedSpans, { kind: "nested-malformed", start: lineStart, end: lineStart + line.length, text: line });
     else {
       const swallowed = /^\*[^\n]*"[^"\n]+"[^\n]*\*$/.exec(line);
@@ -119,8 +125,8 @@ export function scanMarkdown(text: string): MarkdownIssue[] {
   }
 
   scanMatches(text, /\*\*[^*\n]+\*\*/g, "bold-asterisk", issues, protectedSpans);
-  scanMatches(text, /__[^_\n]+__/g, "bold-underscore", issues, protectedSpans);
-  scanMatches(text, /(?<![\\_])_([^_\n]+)_(?!_)/g, "underscore-italics", issues, protectedSpans);
+  scanMatches(text, /(?<![\p{L}\p{N}_])__[^_\n]+__(?![\p{L}\p{N}_])/gu, "bold-underscore", issues, protectedSpans);
+  scanMatches(text, /(?<![\p{L}\p{N}\\_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, "underscore-italics", issues, protectedSpans);
 
   let quoteMatch: RegExpExecArray | null;
   const quoted = /"[^"\n]*"/g;
@@ -283,6 +289,39 @@ export function formattingProfileProposals(text: string, options: FormattingProf
       if (!proposalOverlaps(proposals, start, end)) {
         proposals.push(makeProposal("formatting.likely-thought", start, marked, thoughtReplacement(marked, convention), "low", `This passage follows a thought cue. Convert it to the selected ${convention} thought convention only after review.`));
       }
+    }
+  }
+
+  if (options.fieldLabel) {
+    let lineStart = 0;
+    for (const line of text.split("\n")) {
+      const trimmed = line.trim();
+      const leadingLength = line.length - line.trimStart().length;
+      const narrationStart = lineStart + leadingLength;
+      const startsWithNarrator = /^(?:\{\{\s*(?:user|char)\s*\}\}(?:\s|$)|(?:she|he|they|it)\b)/i.test(trimmed);
+      const structuralMarkdown = /^(?:#{1,6}\s|>\s|[-+*]\s|\d+[.)]\s|\*{3,}$)/.test(trimmed);
+      const containsFormatting = /(?<!\\)[*_`]/.test(trimmed);
+      const containsProtectedCode = /<!--|<%|\$\{/.test(trimmed);
+      const sentenceLike = /[.!?]["')\]}]*$/.test(trimmed) && trimmed.split(/\s+/).length >= 2;
+      if (
+        startsWithNarrator &&
+        sentenceLike &&
+        !structuralMarkdown &&
+        !containsFormatting &&
+        !containsProtectedCode &&
+        !trimmed.includes('"') &&
+        !proposalOverlaps(proposals, narrationStart, narrationStart + trimmed.length)
+      ) {
+        proposals.push(makeProposal(
+          "formatting.plain-narration",
+          narrationStart,
+          trimmed,
+          `*${trimmed}*`,
+          "low",
+          "This appears to be a narration-only line. The house profile uses single-asterisk italics for narration and actions; review the classification before accepting."
+        ));
+      }
+      lineStart += line.length + 1;
     }
   }
 

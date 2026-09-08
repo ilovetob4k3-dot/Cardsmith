@@ -63,4 +63,9 @@ describe("review rules", () => {
     expect(safeResult.applied.map((proposal) => proposal.before)).toEqual(["{{pronounSubjective}}"]);
     expect(() => applyProposal(text, unresolved[0])).toThrow("no target equivalent");
   });
+
+  it("describes non-macro findings as review-only when application is attempted", () => {
+    const finding = analyzeText("*unfinished", "janitor", "janitor").find((proposal) => !proposal.actionable)!;
+    expect(() => applyProposal("*unfinished", finding)).toThrow("review-only");
+  });
 });

@@ -75,7 +75,8 @@ export function analyzeText(text: string, from: PlatformId, to: PlatformId, opti
 
 export function applyProposal(text: string, proposal: EditProposal): string {
   if (!proposal.actionable) {
-    throw new Error("This finding has no target equivalent and cannot be applied.");
+    if (proposal.category === "macro") throw new Error("This finding has no target equivalent and cannot be applied.");
+    throw new Error("This finding is review-only and cannot be applied automatically.");
   }
   if (text.slice(proposal.start, proposal.end) !== proposal.before) {
     throw new Error("The text changed after this suggestion was generated. Run the checks again.");

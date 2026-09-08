@@ -33,6 +33,12 @@ describe("platform-aware preview", () => {
     expect(renderPreview("<!-- unclosed", "sillytavern", "she").text).toBe("<!-- unclosed");
   });
 
+  it("does not let an escaped tilde close a Janitor hidden span", () => {
+    expect(renderPreview("Visible ~hidden\\~ still hidden~ End", "janitor", "she").text).toBe("Visible  End");
+    expect(renderPreview("A ~~hidden\\~~ still hidden~~ B", "janitor", "she").text).toBe("A  B");
+    expect(renderPreview("A ~~~hidden\nacross lines~~~ B", "janitor", "she").text).toBe("A \n B");
+  });
+
   it("continues resolving explicit verb macros", () => {
     expect(renderPreview("They {{pronounVerbBe}} ready.", "janitor", "they").text).toBe("They are ready.");
     expect(renderPreview("She {{pronounVerbBe}} ready.", "sillytavern", "she").text).toBe("She is ready.");

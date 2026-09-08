@@ -76,13 +76,13 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 .editor { flex: 1; width: 100%; min-height: 420px; padding: clamp(16px, 3vw, 30px); resize: none; color: #e8eef5; background: transparent; border: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 1rem; line-height: 1.7; }
 .rule-controls, .preview-controls { padding: 12px 16px; display: flex; align-items: end; gap: 12px; border-bottom: 1px solid var(--line); background: #111821; }
 .rule-controls { flex-wrap: wrap; }
-.rule-controls label, .preview-controls label { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: .78rem; }
+.rule-controls label, .preview-controls label { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: .875rem; }
 select, input { padding: 8px 10px; color: #eef5f8; background: var(--raised); border: 1px solid var(--line); border-radius: 7px; }
 select { padding-right: 34px; }
 .analysis-settings { border-bottom: 1px solid var(--line); background: #0e151d; }
 .analysis-settings > summary { padding: 12px 16px; color: #cbd7e2; cursor: pointer; font-weight: 700; }
 .settings-grid { padding: 2px 16px 14px; display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 12px; }
-.settings-grid > label { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: .78rem; }
+.settings-grid > label { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: .875rem; }
 .settings-grid .checkbox-control { min-height: 62px; padding: 9px 10px; display: grid; grid-template-columns: auto 1fr; align-content: center; column-gap: 9px; background: var(--raised); border: 1px solid var(--line); border-radius: 7px; }
 .checkbox-control input { width: 17px; height: 17px; padding: 0; accent-color: var(--cyan); }
 .checkbox-control span { color: #eef5f8; font-weight: 700; }
@@ -176,6 +176,7 @@ select { padding-right: 34px; }
 .summary-actions { padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; border-top: 1px solid var(--line); }
 .summary-actions span { color: var(--muted); font-size: .8rem; }
 .status { min-height: 36px; padding: 8px clamp(16px, 4vw, 38px); display: flex; justify-content: space-between; gap: 20px; color: #aab8c7; background: #090c10; border-top: 1px solid var(--line); font-size: .78rem; }
+.status a { color: var(--cyan); font-weight: 700; }
 .status.error { color: var(--danger); }
 .muted { color: var(--muted); }
 .padded { padding: 16px; }
@@ -193,7 +194,7 @@ select { padding-right: 34px; }
   .file-actions { display: grid; grid-template-columns: 1fr 1.5fr; }
   .warning-panel { grid-template-columns: 1fr; gap: 7px; }
   .tabs { position: sticky; top: 0; z-index: 4; padding: 0; }
-  .tabs button { min-width: 0; flex: 1; padding: 0 4px; overflow: hidden; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
+  .tabs button { min-width: 0; flex: 1; padding: 0 4px; overflow: hidden; font-size: .875rem; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-field-picker { padding: 10px 16px; display: flex; flex-direction: column; gap: 5px; color: var(--muted); background: #0e131a; border-bottom: 1px solid var(--line); font-size: .82rem; }
   .mobile-field-picker select { width: 100%; }
   .workspace-grid { display: block; }
@@ -221,5 +222,5 @@ select { padding-right: 34px; }
   .summary-sections li { align-items: flex-start; flex-direction: column; }
   .summary-actions { align-items: stretch; flex-direction: column; }
   .status { position: sticky; bottom: 0; display: block; }
-  .status span:last-child { display: none; }
+  .status > span + span { display: none; }
 }

@@ -94,11 +94,15 @@ For warning fixtures:
 - [ ] Medium- and low-confidence formatting proposals require individual acceptance.
 - [ ] The tolerant Markdown scanner distinguishes valid action italics, swallowed dialogue, dialogue emphasis, nested/malformed emphasis, escaped literals, and unmatched delimiters.
 - [ ] Escaped asterisks and underscores, macro code, backticks, template code, and HTML comments are preserved.
+- [ ] Markdown bullet markers, `***` thematic breaks, and intraword underscores do not appear as unmatched-emphasis findings.
 - [ ] Ambiguous Markdown repairs and all plain-pronoun or gender-term replacements remain outside card-wide safe apply.
 - [ ] The formatting profile keeps dialogue plain, proposes single-asterisk action italics, proposes backticks for displayed text, and changes thoughts only after a convention is selected.
 - [ ] Plain-pronoun review distinguishes user, character, named, plural, and unknown referents plus subject, object, possessive, and reflexive roles.
+- [ ] Pronouns inside any `{{...}}` template span remain unchanged, while preceding `{{user}}` and `{{char}}` macros can still act as referent cues.
+- [ ] Object-form `her` before an adverb or determiner is not proposed as a possessive determiner.
 - [ ] Plural and unknown referents are preserved as manual-review findings.
 - [ ] Gendered terms and body descriptors produce no findings until their separate opt-in controls are enabled; body descriptors remain review-only.
+- [ ] Neutral gender terms with multiple relationship-specific forms, such as `child`, remain unchanged as an ambiguity finding.
 - [ ] Ignoring one proposal does not alter the text.
 - [ ] Editing a field regenerates proposals so stale positions cannot be applied.
 
@@ -111,6 +115,7 @@ For warning fixtures:
 - [ ] HTML-like card text is escaped and cannot execute markup or scripts.
 - [ ] Raw/source mode preserves every source character and performs no macro substitution.
 - [ ] Janitor user-visible mode hides only complete tilde-hidden segments.
+- [ ] Escaped tildes inside Janitor hidden text do not prematurely close the hidden segment; single-, double-, and triple-tilde forms retain newline layout.
 - [ ] SillyTavern user-visible mode hides only complete HTML comments.
 - [ ] Hidden preview material remains unchanged in Edit and in the exported card.
 - [ ] Explicit verb macros such as `{{pronounVerbBe}}` still resolve where the selected macro family supports them.
@@ -123,6 +128,7 @@ For every edited fixture:
 
 - [ ] **Review export** opens a whole-card summary before a download can begin.
 - [ ] The summary lists changed fields, accepted proposals by category and rule, manual edits, ignored findings, unresolved macros, selected profiles, file type, and detected card version.
+- [ ] The summary's open-review section includes pending actionable suggestions as well as review-only findings.
 - [ ] Markdown and JSON ledger downloads describe the same current review state as the visible summary.
 - [ ] Ledger filenames preserve the source basename and use `-cardsmith-ledger.md` or `-cardsmith-ledger.json`.
 - [ ] Export produces a new `-edited` filename and leaves the original untouched.
@@ -144,6 +150,7 @@ Complete these checks in current mobile Firefox and Chrome when possible:
 - [ ] Long macro replacements scroll horizontally without visually breaking their brace structure.
 - [ ] Editing, review controls, previews, warnings, and export remain usable at phone width.
 - [ ] The edited download completes and can be located on the device.
+- [ ] After a download attempt, the temporary **Download again** link works while the local object URL remains available.
 - [ ] A blocked download reports instructions to allow site downloads and check the Downloads folder.
 - [ ] Firefox Android download behavior is recorded as tested before release notes claim support.
 - [ ] The deployed application installs as a PWA.

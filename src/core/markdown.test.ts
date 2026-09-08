@@ -43,6 +43,12 @@ describe("tolerant Markdown scanner", () => {
     expect(formattingProfileProposals(text)).toEqual([]);
   });
 
+  it("does not mistake Markdown lists, thematic breaks, or intraword underscores for unmatched emphasis", () => {
+    const text = "* first item\n* second **bold** item\n***\nfield_name\nfoo_bar_baz\n2*3";
+    expect(scanMarkdown(text).filter((issue) => issue.kind === "unmatched-marker")).toEqual([]);
+    expect(formattingProfileProposals(text, { fieldLabel: "Description" }).map((proposal) => proposal.ruleId)).toEqual(["formatting.bold-asterisk"]);
+  });
+
   it("offers field-aware displayed-text and explicitly selected thought conventions", () => {
     const text = 'The phone screen read "CASE 041". She thought: *Do not answer.*';
     const proposals = formattingProfileProposals(text, { fieldLabel: "Description", thoughtConvention: "backticks" });
@@ -52,5 +58,18 @@ describe("tolerant Markdown scanner", () => {
     ]);
     expect(proposals.map((proposal) => proposal.after)).toEqual(["`CASE 041`", "`Do not answer.`"]);
     expect(formattingProfileProposals(text, { fieldLabel: "Name", thoughtConvention: "backticks" })).toEqual([]);
+  });
+
+  it("offers conservative, review-required normalization for narration-only prose lines", () => {
+    const narration = formattingProfileProposals("She crossed the room.", { fieldLabel: "Description" });
+    expect(narration).toHaveLength(1);
+    expect(narration[0]).toMatchObject({
+      ruleId: "formatting.plain-narration",
+      after: "*She crossed the room.*",
+      confidence: "low",
+      actionable: true
+    });
+    expect(formattingProfileProposals('"Hello."', { fieldLabel: "Description" })).toEqual([]);
+    expect(formattingProfileProposals("She crossed the room.", { fieldLabel: "Name" })).toEqual([]);
   });
 });

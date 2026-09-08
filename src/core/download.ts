@@ -1,10 +1,15 @@
 export const DOWNLOAD_REVOKE_DELAY_MS = 60_000;
 
+export interface DownloadReceipt {
+  url: string;
+  fileName: string;
+}
+
 export function downloadBlockedMessage(fileName: string): string {
   return `Your browser blocked the download for ${fileName}. Allow downloads for this site, then try again. On mobile, also check the browser's Downloads folder.`;
 }
 
-export function downloadBytes(bytes: Uint8Array, fileName: string, mimeType: string): void {
+export function downloadBytes(bytes: Uint8Array, fileName: string, mimeType: string): DownloadReceipt {
   const copy = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(copy).set(bytes);
   const blob = new Blob([copy], { type: mimeType });
@@ -23,6 +28,7 @@ export function downloadBytes(bytes: Uint8Array, fileName: string, mimeType: str
     anchor.remove();
   }
   window.setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_REVOKE_DELAY_MS);
+  return { url, fileName };
 }
 
 export function editedFileName(fileName: string): string {

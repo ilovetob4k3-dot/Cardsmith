@@ -7,7 +7,7 @@ import {
   openCardFindings,
   safeCardFindings
 } from "./core/cardReview";
-import { downloadBytes, editedFileName, ledgerFileName } from "./core/download";
+import { DOWNLOAD_REVOKE_DELAY_MS, downloadBytes, editedFileName, ledgerFileName, type DownloadReceipt } from "./core/download";
 import { macroReferenceRows, platformProfiles, type PlatformId, type PreviewPronouns } from "./core/macros";
 import type { ThoughtConvention } from "./core/markdown";
 import { renderPreview, type PreviewMode } from "./core/preview";
@@ -120,6 +120,7 @@ function App() {
   const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
   const [cardWideUndo, setCardWideUndo] = useState<CardWideUndo | null>(null);
   const [expandedReviewFields, setExpandedReviewFields] = useState<Set<string>>(new Set());
+  const [downloadFallback, setDownloadFallback] = useState<DownloadReceipt | null>(null);
 
   const analysisOptions = useMemo<AnalysisOptions>(() => ({
     formatting: { enabled: formattingEnabled, thoughtConvention },
@@ -151,8 +152,8 @@ function App() {
   const unresolvedCount = cardReviews.reduce((count, review) => count + review.findings.filter((proposal) => !proposal.actionable && proposal.category === "macro").length, 0);
   const manualReviewCount = allOpenFindings.filter((entry) => !entry.proposal.actionable && entry.proposal.category !== "macro").length;
   const changeSummary = useMemo(
-    () => workspace ? buildChangeSummary(workspace, fromPlatform, toPlatform, accepted, ignored, manualFieldIds, analysisOptions) : null,
-    [workspace, fromPlatform, toPlatform, accepted, ignored, manualFieldIds, analysisOptions]
+    () => workspace && tab === "summary" ? buildChangeSummary(workspace, fromPlatform, toPlatform, accepted, ignored, manualFieldIds, analysisOptions) : null,
+    [workspace, tab, fromPlatform, toPlatform, accepted, ignored, manualFieldIds, analysisOptions]
   );
   const reviewFields = useMemo(() => workspace?.fields.map((field) => ({
     field,
@@ -171,6 +172,14 @@ function App() {
     setPendingSelection(null);
   }, [pendingSelection, selectedField?.id, tab]);
 
+  useEffect(() => {
+    if (!downloadFallback) return;
+    const timeout = window.setTimeout(() => {
+      setDownloadFallback((current) => current?.url === downloadFallback.url ? null : current);
+    }, DOWNLOAD_REVOKE_DELAY_MS);
+    return () => window.clearTimeout(timeout);
+  }, [downloadFallback]);
+
   async function loadFile(file: File): Promise<void> {
     try {
       const imported = importCardBytes(file.name, new Uint8Array(await file.arrayBuffer()));
@@ -182,6 +191,7 @@ function App() {
       setCardWideUndo(null);
       setExpandedReviewFields(new Set(imported.fields[0] ? [imported.fields[0].id] : []));
       setReviewAll(false);
+      setDownloadFallback(null);
       setTab("edit");
       const warningSummary = imported.warnings.length > 0 ? ` · ${imported.warnings.length} warning${imported.warnings.length === 1 ? "" : "s"}` : "";
       setMessage(`${imported.version.toUpperCase()} ${imported.source.toUpperCase()} loaded locally${warningSummary}`);
@@ -305,13 +315,14 @@ function App() {
 
   function exportFile(): void {
     if (!workspace) return;
+    setDownloadFallback(null);
     try {
       const bytes = exportCardBytes(workspace);
       const verified = importCardBytes(workspace.fileName, bytes);
       if (JSON.stringify(verified.card) !== JSON.stringify(workspace.card)) {
         throw new Error("The exported card did not pass the re-import verification.");
       }
-      downloadBytes(bytes, editedFileName(workspace.fileName), workspace.source === "png" ? "image/png" : "application/json");
+      setDownloadFallback(downloadBytes(bytes, editedFileName(workspace.fileName), workspace.source === "png" ? "image/png" : "application/json"));
       setMessage("Export verified and download started.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Export failed.");
@@ -320,11 +331,12 @@ function App() {
 
   function exportLedger(format: "md" | "json"): void {
     if (!workspace || !changeSummary) return;
+    setDownloadFallback(null);
     try {
       const content = format === "md"
         ? summaryToMarkdown(changeSummary, workspace.fileName)
         : summaryToJson(changeSummary, workspace.fileName);
-      downloadBytes(new TextEncoder().encode(content), ledgerFileName(workspace.fileName, format), format === "md" ? "text/markdown" : "application/json");
+      setDownloadFallback(downloadBytes(new TextEncoder().encode(content), ledgerFileName(workspace.fileName, format), format === "md" ? "text/markdown" : "application/json"));
       setMessage(`${format.toUpperCase()} change ledger download started.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Ledger download failed.");
@@ -576,7 +588,7 @@ function App() {
                     <section><h2>Accepted proposals by rule</h2>{changeSummary.acceptedByRule.length > 0 ? <ul>{changeSummary.acceptedByRule.map((rule) => <li key={`${rule.category}:${rule.ruleId}`}><code>{rule.category} · {rule.ruleId}</code><span>{rule.count}</span></li>)}</ul> : <p className="muted">No proposals were accepted.</p>}</section>
                     <section><h2>Manual edits</h2>{changeSummary.manualFields.length > 0 ? <ul>{changeSummary.manualFields.map((field) => <li key={field.id}>{field.label}</li>)}</ul> : <p className="muted">No changed fields contain manual edits.</p>}</section>
                     <section><h2>Ignored findings</h2>{changeSummary.ignored.length > 0 ? <ul>{changeSummary.ignored.map((entry) => <li key={findingKey(entry.fieldId, entry.proposal)}><span>{entry.fieldLabel}</span><code>{entry.proposal.before}</code></li>)}</ul> : <p className="muted">No findings were ignored.</p>}</section>
-                    <section className="wide"><h2>Manual review findings</h2>{changeSummary.reviewRequired.length > 0 ? <ul>{changeSummary.reviewRequired.map((entry) => <li key={findingKey(entry.fieldId, entry.proposal)}><span>{entry.fieldLabel}</span><code>{entry.proposal.before}</code><small>{entry.proposal.explanation}</small></li>)}</ul> : <p className="muted">No ambiguous formatting, referent, or body-description findings remain.</p>}</section>
+                    <section className="wide"><h2>Open review findings</h2>{changeSummary.reviewRequired.length > 0 ? <ul>{changeSummary.reviewRequired.map((entry) => <li key={findingKey(entry.fieldId, entry.proposal)}><span>{entry.fieldLabel}</span><code>{entry.proposal.before}</code><small>{entry.proposal.explanation}</small></li>)}</ul> : <p className="muted">No outstanding formatting, pronoun, gender, macro-conversion, structure, or punctuation findings remain.</p>}</section>
                     <section className="wide"><h2>Macros without target equivalents</h2>{changeSummary.unresolved.length > 0 ? <ul>{changeSummary.unresolved.map((entry) => <li key={findingKey(entry.fieldId, entry.proposal)}><span>{entry.fieldLabel}</span><code>{entry.proposal.before}</code><small>{entry.proposal.explanation}</small></li>)}</ul> : <p className="muted">Every recognized source macro has a target equivalent.</p>}</section>
                   </div>
                   <div className="summary-actions"><button className="primary" onClick={exportFile}>Download verified card</button><button className="secondary" onClick={() => exportLedger("md")}>Download Markdown ledger</button><button className="secondary" onClick={() => exportLedger("json")}>Download JSON ledger</button><span>The card is re-imported and compared before download. Ledgers capture the current review state.</span></div>
@@ -588,7 +600,7 @@ function App() {
       )}
 
       <footer className={message.toLowerCase().includes("failed") || message.toLowerCase().includes("invalid") || message.toLowerCase().includes("blocked") ? "status error" : "status"} aria-live="polite">
-        <span>{message}</span>
+        <span>{message}{downloadFallback && <> · <a href={downloadFallback.url} download={downloadFallback.fileName}>Download again</a></>}</span>
         {workspace && <span>Original retained in memory · {changedFields} field{changedFields === 1 ? "" : "s"} changed</span>}
       </footer>
     </main>

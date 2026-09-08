@@ -55,12 +55,14 @@ export function buildChangeSummary(
     .map((field) => ({ id: field.id, label: field.label }));
   const findings = workspace.fields.flatMap((field) =>
     analyzeText(field.value, from, to, { ...options, formatting: { ...options.formatting, fieldLabel: field.label } })
-      .filter((proposal) => !proposal.actionable)
       .map((proposal) => ({ fieldId: field.id, fieldLabel: field.label, proposal }))
   );
-  const unresolved = findings.filter((entry) => entry.proposal.category === "macro");
+  const unresolved = findings.filter((entry) => entry.proposal.category === "macro" && !entry.proposal.actionable);
   const ignoredKeys = new Set(ignored.map((entry) => findingKey(entry.fieldId, entry.proposal)));
-  const reviewRequired = findings.filter((entry) => entry.proposal.category !== "macro" && !ignoredKeys.has(findingKey(entry.fieldId, entry.proposal)));
+  const reviewRequired = findings.filter((entry) =>
+    !(entry.proposal.category === "macro" && !entry.proposal.actionable) &&
+    !ignoredKeys.has(findingKey(entry.fieldId, entry.proposal))
+  );
   const grouped = new Map<string, AcceptedRuleSummary>();
   for (const entry of accepted) {
     const key = `${entry.proposal.category}:${entry.proposal.ruleId}`;
@@ -132,7 +134,7 @@ ${ignored}
 
 ${unresolved}
 
-## Manual review findings
+## Open review findings
 
 ${reviewRequired}
 `;

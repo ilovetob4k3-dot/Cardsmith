@@ -88,6 +88,16 @@ describe("whole-card change summary", () => {
 
     expect(summary.unresolved).toEqual([]);
     expect(summary.reviewRequired.some((entry) => entry.proposal.ruleId === "formatting.unmatched-marker")).toBe(true);
-    expect(summaryToMarkdown(summary, "rhea.json")).toContain("## Manual review findings");
+    expect(summaryToMarkdown(summary, "rhea.json")).toContain("## Open review findings");
+  });
+
+  it("includes unresolved actionable suggestions in the current review state", () => {
+    const source = { spec: "chara_card_v2", data: { name: "Rhea", description: "**loud**" } };
+    const workspace = importCardBytes("rhea.json", new TextEncoder().encode(JSON.stringify(source)));
+    const summary = buildChangeSummary(workspace, "janitor", "wyvern", [], [], new Set(), { formatting: { enabled: true } });
+
+    expect(summary.reviewRequired).toHaveLength(1);
+    expect(summary.reviewRequired[0].proposal).toMatchObject({ ruleId: "formatting.bold-asterisk", actionable: true });
+    expect(summaryToMarkdown(summary, "rhea.json")).toContain("After:");
   });
 });
